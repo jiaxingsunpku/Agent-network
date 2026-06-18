@@ -1,0 +1,75 @@
+{
+  "junction_id": "intersection_1_1",
+  "position": [120.0, 80.0],
+  "junction_type": "traffic_light",
+  "is_active": true,
+  "control_mode": "auto",
+  "incoming_lanes": {
+    "edge_north_1_1_0": {
+      "lane_id": "edge_north_1_1_0",
+      "length": 200.0,
+      "speed_limit": 13.89,
+      "vehicle_count": 8,
+      "mean_speed": 3.2,
+      "occupancy": 0.41,
+      "halting_count": 5
+    },
+    "edge_south_1_1_0": {
+      "lane_id": "edge_south_1_1_0",
+      "length": 200.0,
+      "speed_limit": 13.89,
+      "vehicle_count": 6,
+      "mean_speed": 4.8,
+      "occupancy": 0.33,
+      "halting_count": 3
+    },
+    "edge_east_1_1_0": {
+      "lane_id": "edge_east_1_1_0",
+      "length": 180.0,
+      "speed_limit": 13.89,
+      "vehicle_count": 3,
+      "mean_speed": 9.1,
+      "occupancy": 0.16,
+      "halting_count": 1
+    },
+    "edge_west_1_1_0": {
+      "lane_id": "edge_west_1_1_0",
+      "length": 180.0,
+      "speed_limit": 13.89,
+      "vehicle_count": 4,
+      "mean_speed": 7.5,
+      "occupancy": 0.22,
+      "halting_count": 2
+    }
+  },
+  "outgoing_lanes": {
+    "edge_out_1_1_0": {
+      "lane_id": "edge_out_1_1_0",
+      "length": 200.0,
+      "speed_limit": 13.89,
+      "vehicle_count": 5,
+      "mean_speed": 10.4,
+      "occupancy": 0.18,
+      "halting_count": 0
+    }
+  },
+  "traffic_light": {
+    "phase_state": "GGGGrrrrGGGGrrrr",
+    "phase_duration": 12.0,
+    "next_switch_time": 8.0,
+    "last_update_time": 1750000000.0
+  },
+  "metrics": {
+    "total_vehicles": 21,
+    "average_speed": 5.36,
+    "average_occupancy": 0.28,
+    "total_halting": 11,
+    "congestion_level": 0.62,
+    "total_vehicles_passed": 1200,
+    "total_waiting_time": 540.0,
+    "max_queue_length": 7,
+    "last_update_time": 1750000000.0
+  },
+  "metrics_history": [],
+  "connected_junctions": []
+}

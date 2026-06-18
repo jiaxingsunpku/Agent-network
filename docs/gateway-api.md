@@ -1,0 +1,153 @@
+# 网关 API：前端 ↔ 网关 HTTP 契约
+
+网关（`backend/anp/gateway`，FastAPI）是纯读模型 + 命令入口。**对外契约刻意保持与老仓库前端兼容**，使前端可照搬，只改 API base 指向新网关。前端期望结构见老仓库 `agent_network_frontend/src/types.ts` 与 `src/api/agentNetworkClient.ts`。
+
+通用约定：
+- 路径前缀 `/api/agent-network`。响应 `Content-Type: application/json`（前端据此判断是否回落 mock）。
+- JSON 字段用 **snake_case**；前端 normalizer 同时接受 snake/camel。
+- 网关不可用、非 JSON、或无有效节点时，前端自动回落 mock（状态条显示 `source mock`；可用时显示 `source gateway`）。
+- 鉴权（可选，默认关）：`AGENT_NETWORK_REQUIRE_AUTH=true` 时读接口需 read token、命令需 admin token，走 `Authorization: Bearer <token>`。命令尝试可写审计账本（不存 token、不存完整 payload）。
+
+## 1. GET /api/agent-network/snapshot
+
+查询参数：`scope`（可选）。返回 `NetworkSnapshot`：
+
+```jsonc
+{
+  "version": "gateway",
+  "generated_at": "...Z",
+  "topology_version": "traffic-v1",
+  "region": "traffic",
+  "summary": { "agents": 3, "relations": 6, "resources": 5,
+               "healthy_percent": 92, "kafka_lag_ms": 0, "update_rate": 0.1 },
+  "nodes": [ /* §1.1 */ ],
+  "edges": [ /* §1.2 */ ],
+  "resources": [ /* §1.3 */ ],
+  "trend": [ { "t": 0, "value": 180 } ],
+  "events": [ { "id": "...", "severity": "info", "title": "...", "target_id": "...", "time": "...Z" } ]
+}
+```
+
+### 1.1 nodes
+两类来源合并：
+- **路口节点**（来自 World Status）：`node_type="region"`，`group="traffic"`，metrics 由 World Status 映射：
+  ```jsonc
+  { "id": "gg-xiongchu-minzu", "label": "雄楚-民族", "node_type": "region", "group": "traffic",
+    "position": { "x": 0, "y": 0 }, "status": "online", "health": 80, "tags": ["traffic"],
+    "metrics": { "flow": 180, "speedKmh": 29.9, "delaySec": 41.2, "queueM": 35.0, "state": "拥堵" } }
+  ```
+  - `status`：World Status 新鲜度 + 拥堵度映射（畅通/缓行→online，拥堵→warning，严重或超时→offline，刚建立→syncing）。`health = clamp(100 − congestion_index×100)`。
+- **智能体节点**（来自 registry）：`node_type="agent"`，metrics 含心跳/能力；`status` 由 heartbeat 在线/降级映射。
+
+### 1.2 edges
+路口之间的路网连接 + 智能体与实体的关系，来自静态路网拓扑配置（`deploy/` 或 `backend` 内常量）。字段：`id, source, target, label, directed, relation_type, status, metrics`。
+
+### 1.3 resources
+来源/去向物理资源：`resource_type ∈ camera|database|detector|simulator|storage|controller`，`direction ∈ input|output|bidirectional`，`anchor_agent_id` 锚定到某节点。v1 用少量静态资源（检测器=input、控制器/库=output）。
+
+## 2. GET /api/agent-network/projection
+
+查询参数：`kind ∈ world_model|node|edge|resource`、`id`。返回 `InspectorProjection`：
+
+```jsonc
+{
+  "target": { "kind": "node", "id": "gg-xiongchu-minzu", "title": "雄楚-民族" },
+  "tabs": [
+    { "id": "status", "title": "当前态",
+      "blocks": [ { "type": "metric_grid", "title": "路口指标",
+                    "items": [ {"label":"排队(m)","value":35.0}, {"label":"流量(veh/h)","value":180} ] } ] },
+    { "id": "control", "title": "命令闭环",
+      "blocks": [ { "type": "event_list", "title": "最近命令/ack", "items": [ /* ... */ ] } ] }
+  ]
+}
+```
+
+- block `type ∈ metric_grid|kv_list|event_list|timeseries|json`（前端已支持）。
+- 路口节点：tabs 给 World Status 当前态、最近窗口、相关命令/ack。
+- 智能体节点：tabs 给 registry 信息、心跳、能力、可下发命令清单（驱动 Inspector 命令面板）。
+- `target` 缺失或 `tabs` 非数组时前端判为无效并回落，必须保证结构完整。
+
+## 3. POST /api/agent-network/commands
+
+请求体：
+
+```jsonc
+{ "target_agent_id": "traffic-virtual-001", "command_type": "set_signal_plan",
+  "payload": { "desired_phase": "north_south_green", "duration_s": 25 },
+  "site_id": "...", "region_id": "...", "object_id": "...", "expires_in_sec": 30 }
+```
+
+网关校验：
+1. `target_agent_id` 必填且在白名单 → 否则 `400`（缺失）/ `403`（不在白名单）。
+2. `command_type` 合法 → 否则 `400`。
+3. **拒绝** `broadcast` 与 `agent_ids` 字段 → `400`（前端也会本地拦截）。
+4. 构造 envelope：`target.agent_id = target_agent_id`，`time.expires_at = now + expires_in_sec`，发布到 `anp.<domain>.command.v1`。
+5. 可写命令审计账本。
+
+成功 `200`：
+
+```jsonc
+{ "ok": true, "command_id": "...", "topic": "anp.traffic.command.v1",
+  "target": { "agent_id": "traffic-virtual-001" }, "status": "published", "message_id": "..." }
+```
+
+错误：`400` 入参非法、`403` 未授权/不在白名单、`503` Kafka 不可用、`500` 发布失败。错误体统一：
+
+```jsonc
+{ "ok": false, "error": { "code": "...", "message": "..." } }
+```
+
+网关**不伪造 ack**。命令是否被执行端接受，由前端订阅/查询 ack 反映（v1 可在 projection 的命令闭环 tab 展示最近 ack）。
+
+## 4. POST /api/agent-network/edge-inference（本期可选）
+
+前端 `runEdgeInference` 会调用。v1 仅对声明 inference 能力的 agent 生效；交通虚拟体不支持时返回结构化错误，前端按钮显示失败、不崩主界面：
+
+```jsonc
+{ "ok": false, "agent_id": "...", "mode": "auto",
+  "error": { "code": "unsupported", "message": "edge inference 未在本期交通域启用" } }
+```
+
+## 5. GET /api/agent-network/timeseries/{health|latest|summary|events}（冷路径，本期未启用）
+
+冷路径 TimescaleDB 本期不做，但**保留接口**，返回结构化「未启用」，让前端 Inspector 时序区显示空态/错误态而不影响主界面：
+
+```jsonc
+{ "ok": false, "error": { "code": "timeseries_disabled",
+  "message": "cold path not enabled in v1" } }
+```
+
+前端 `fetchTimeseriesJson` 把 `ok:false` 当错误结果处理，主 snapshot/projection 不受影响。
+
+## 6. 部署形态（P4 落地）
+
+- 开发：前端 `cd frontend && npm run dev`（18180）。默认**不设** `VITE_AGENT_NETWORK_API_BASE`，由 vite dev/preview 把 `/api/*` 反代到 `VITE_GATEWAY_PROXY`（默认 `http://127.0.0.1:8000`，即 `run_gateway.py`）；设了绝对 base 则客户端直连、不反代（生产/前端与网关不同源）。
+- 取数开关：前端沿用老约定，仅当 URL 带 `?source=gateway` 才尝试网关 snapshot（否则纯 mock 简化壳）。网关有有效节点时状态条显示 `source gateway`，并在右侧 Inspector 挂回命令面板 + 命令闭环（projection 3s 轮询拾取 ack）。
+- 一体化：网关同时托管前端 `dist` 并反代 `/api/*`（沿用老仓库 `serve-with-gateway` 思路，本期暂未做静态托管）。
+- 前端不直连 Kafka；所有数据经本网关。前端字段对齐：命令选项以 snapshot agent 节点的 `metrics.commandTypes` 为权威来源（见 §1.1）。
+
+## 7. 实现说明（v1，P3 落地）
+
+实现见 `backend/anp/gateway/`，registry 见 `backend/anp/registry/`。要点：
+
+- **网关自持读模型**：网关进程独立于系统级智能体，后台用消费线程订阅
+  `status.intersection`（→ 自己的 World Status 当前态 + `trend`）、`ack`（→ 命令日志回填）、
+  `agent.lifecycle`/`agent.heartbeat`（→ registry 在线状态）。HTTP 层只读这份内存态，不回放、不聚合。
+- **节点来源**：路口节点恒来自静态拓扑（`gateway/topology.py`，v1 雄楚大道三路口），叠加 World Status
+  指标；无 World Status 时状态 `syncing`、指标置 0（保证 snapshot 节点非空，前端不因空节点回落）。
+  智能体节点来自 registry；另有一个网关自身的 `service` 节点（`traffic-gateway-001`）供资源锚定。
+- **路口节点 metrics 键**：`flow / speedKmh / delaySec / queueM / state / congestionIndex`（world-status.md §5 映射）。
+- **summary**：`agents` 只计智能体节点；`healthy_percent` 为全部节点 health 均值；`kafka_lag_ms=0`（v1 不测量）；
+  `update_rate = 1/WINDOW_SIZE_SEC = 0.1`（World Status 产出频率 Hz）。
+- **命令错误码**（统一错误体 `{ok:false,error:{code,message}}`）：
+  - `400`：`missing_target_agent_id`、`broadcast_not_allowed`（带 `broadcast`/`agent_ids`）、
+    `invalid_command_type`、`invalid_expires_in_sec`、`invalid_payload`、`invalid_body`。
+  - `403`：`target_not_whitelisted`（目标不在 registry）、`command_not_allowed_for_target`（目标不接收该命令类型）。
+  - `503`：`kafka_unavailable`；`500`：`publish_failed`。
+- **白名单**：由 registry 裁决（谁注册了、接收哪些 `command_types`）。v1 种子注册 `traffic-virtual-001`
+  （perception+exec，接 `set_signal_plan`）与 `traffic-system-001`（不接命令）。
+- **网关只校验命令外形 + 白名单**，不做业务安全判定（相位/时长范围属执行端 Safety Guard，protocol.md §7）。
+- **projection 始终返回结构完整**（`target` + `tabs`）：未知 id 也回最小合法投影，避免前端整体回落 mock。
+- **鉴权**：`AGENT_NETWORK_REQUIRE_AUTH=true` 时读接口需 `AGENT_NETWORK_READ_TOKEN`（admin token 也可读）、
+  命令需 `AGENT_NETWORK_ADMIN_TOKEN`，走 `Authorization: Bearer`。默认关闭。
+- **运行**：`python backend/scripts/run_gateway.py [--port 8000] [--no-consumers]`（开发期 CORS 全开）。

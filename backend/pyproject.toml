@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anp"
+version = "0.1.0"
+description = "Agent Network Platform —— 基于 Kafka 的分布式黑板后端（契约 / 系统级智能体 / 网关）"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.9,<3",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "kafka-python>=2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "jsonschema>=4.21",
+    "httpx>=0.27",          # starlette TestClient（网关接口测试）
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["anp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

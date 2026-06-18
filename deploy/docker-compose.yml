@@ -1,0 +1,43 @@
+# ANP 单节点 Kafka（KRaft，无 ZooKeeper）—— 仅供本地开发与端到端冒烟。
+# 借鉴老仓库的 docker-compose 单节点思路，换成官方 apache/kafka 镜像 + KRaft。
+# 起停见 deploy/README.md。生产级多区域部署不在本期范围（AGENTS.md §1）。
+name: anp
+
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: anp-kafka
+    ports:
+      - "9092:9092" # 宿主机/后端客户端入口（advertised = localhost:9092）
+    environment:
+      # --- KRaft 组合节点（broker + controller 同进程，单节点）---
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      # --- 监听器：9092 给客户端，9093 给 controller ---
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # --- 单节点副本因子必须为 1 ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      # 显式建 topic（见 deploy/create_topics.sh），关闭自动建 topic 以暴露契约偏差
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  kafka-data:
+    driver: local

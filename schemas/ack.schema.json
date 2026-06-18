@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "AckStatus": {
+      "description": "命令回执状态（docs/protocol.md §5「ack status 枚举」）。",
+      "enum": [
+        "accepted",
+        "completed",
+        "rejected",
+        "duplicate",
+        "expired",
+        "failed"
+      ],
+      "title": "AckStatus",
+      "type": "string"
+    },
+    "CommandType": {
+      "description": "下行命令类型白名单（docs/protocol.md §5）。本期仅信号配时。",
+      "enum": [
+        "set_signal_plan"
+      ],
+      "title": "CommandType",
+      "type": "string"
+    },
+    "SafetyDecision": {
+      "additionalProperties": false,
+      "description": "执行端本地 Safety Guard 的判定（权威安全闭环在执行端，docs/protocol.md §5/§7）。",
+      "properties": {
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "title": "SafetyDecision",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "command_id": {
+      "minLength": 1,
+      "title": "Command Id",
+      "type": "string"
+    },
+    "command_type": {
+      "$ref": "#/$defs/CommandType"
+    },
+    "status": {
+      "$ref": "#/$defs/AckStatus"
+    },
+    "safety": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SafetyDecision"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "command_id",
+    "command_type",
+    "status"
+  ],
+  "title": "命令回执 payload（docs/protocol.md §5）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 虚拟环境
+.venv/
+venv/
+backend/.venv/
+
+# 环境与密钥（务必不入库，见 AGENTS.md §1）
+.env
+.env.*
+!.env.example
+
+# 日志 / 运行产物
+*.log
+*.pid
+
+# 前端（迁移后由 frontend/.gitignore 细化）
+node_modules/
+frontend/dist/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/

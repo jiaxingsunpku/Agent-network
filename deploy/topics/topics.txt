@@ -1,0 +1,12 @@
+# ANP 交通域 v1 topic 清单 —— 命名规范见 docs/naming.md，由 deploy/create_topics.sh 读取。
+# 格式：<topic>  <partitions>  <replication_factor>     （# 后为注释，空行忽略）
+# 单节点 Kafka，副本因子一律 1；partition 数预留并行度（按实体 id 分区）。
+#
+# topic                                    partitions  rf
+anp.traffic.perception.observation.v1      6           1
+anp.traffic.status.intersection.v1         6           1
+anp.traffic.command.v1                     3           1
+anp.traffic.ack.v1                         3           1
+anp.traffic.agent.lifecycle.v1             1           1
+anp.traffic.agent.heartbeat.v1             1           1
+anp.traffic.dlq.v1                         1           1

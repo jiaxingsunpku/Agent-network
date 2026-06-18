@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "Approach": {
+      "additionalProperties": false,
+      "description": "单进口方向的一次采样观测（docs/world-status.md §2）。",
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "vehicle_count": {
+          "minimum": 0,
+          "title": "Vehicle Count",
+          "type": "integer"
+        },
+        "halting_count": {
+          "minimum": 0,
+          "title": "Halting Count",
+          "type": "integer"
+        },
+        "mean_speed_mps": {
+          "minimum": 0,
+          "title": "Mean Speed Mps",
+          "type": "number"
+        },
+        "mean_delay_sec": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Delay Sec"
+        }
+      },
+      "required": [
+        "direction",
+        "vehicle_count",
+        "halting_count",
+        "mean_speed_mps"
+      ],
+      "title": "Approach",
+      "type": "object"
+    },
+    "Direction": {
+      "description": "路口进口方向（docs/world-status.md §2）。",
+      "enum": [
+        "north",
+        "south",
+        "east",
+        "west"
+      ],
+      "title": "Direction",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "observation_type": {
+      "const": "traffic.intersection",
+      "default": "traffic.intersection",
+      "title": "Observation Type",
+      "type": "string"
+    },
+    "intersection_id": {
+      "minLength": 1,
+      "title": "Intersection Id",
+      "type": "string"
+    },
+    "approaches": {
+      "items": {
+        "$ref": "#/$defs/Approach"
+      },
+      "minItems": 1,
+      "title": "Approaches",
+      "type": "array"
+    }
+  },
+  "required": [
+    "intersection_id",
+    "approaches"
+  ],
+  "title": "交通路口观测 payload（docs/world-status.md §2）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

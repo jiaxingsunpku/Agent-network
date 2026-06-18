@@ -1,0 +1,155 @@
+{
+  "$defs": {
+    "ApproachStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "queue_length_m": {
+          "minimum": 0,
+          "title": "Queue Length M",
+          "type": "number"
+        },
+        "flow_veh_h": {
+          "minimum": 0,
+          "title": "Flow Veh H",
+          "type": "number"
+        },
+        "mean_speed_kmh": {
+          "minimum": 0,
+          "title": "Mean Speed Kmh",
+          "type": "number"
+        }
+      },
+      "required": [
+        "direction",
+        "queue_length_m",
+        "flow_veh_h",
+        "mean_speed_kmh"
+      ],
+      "title": "ApproachStatus",
+      "type": "object"
+    },
+    "CongestionLevel": {
+      "description": "拥堵等级，沿用老前端 ``HotIntersectionRuntime.state`` 档位（docs/world-status.md §4）。",
+      "enum": [
+        "畅通",
+        "缓行",
+        "拥堵",
+        "严重"
+      ],
+      "title": "CongestionLevel",
+      "type": "string"
+    },
+    "Direction": {
+      "description": "路口进口方向（docs/world-status.md §2）。",
+      "enum": [
+        "north",
+        "south",
+        "east",
+        "west"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "StatusWindow": {
+      "additionalProperties": false,
+      "description": "滚动窗口元信息（docs/world-status.md §1/§3）。",
+      "properties": {
+        "start": {
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "title": "End",
+          "type": "string"
+        },
+        "size_sec": {
+          "exclusiveMinimum": 0,
+          "title": "Size Sec",
+          "type": "integer"
+        },
+        "sample_count": {
+          "minimum": 0,
+          "title": "Sample Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "size_sec",
+        "sample_count"
+      ],
+      "title": "StatusWindow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "status_type": {
+      "const": "traffic.intersection",
+      "default": "traffic.intersection",
+      "title": "Status Type",
+      "type": "string"
+    },
+    "intersection_id": {
+      "minLength": 1,
+      "title": "Intersection Id",
+      "type": "string"
+    },
+    "window": {
+      "$ref": "#/$defs/StatusWindow"
+    },
+    "queue_length_m": {
+      "minimum": 0,
+      "title": "Queue Length M",
+      "type": "number"
+    },
+    "flow_veh_h": {
+      "minimum": 0,
+      "title": "Flow Veh H",
+      "type": "number"
+    },
+    "mean_speed_kmh": {
+      "minimum": 0,
+      "title": "Mean Speed Kmh",
+      "type": "number"
+    },
+    "mean_delay_sec": {
+      "minimum": 0,
+      "title": "Mean Delay Sec",
+      "type": "number"
+    },
+    "congestion_level": {
+      "$ref": "#/$defs/CongestionLevel"
+    },
+    "congestion_index": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Congestion Index",
+      "type": "number"
+    },
+    "approaches": {
+      "items": {
+        "$ref": "#/$defs/ApproachStatus"
+      },
+      "title": "Approaches",
+      "type": "array"
+    }
+  },
+  "required": [
+    "intersection_id",
+    "window",
+    "queue_length_m",
+    "flow_veh_h",
+    "mean_speed_kmh",
+    "mean_delay_sec",
+    "congestion_level",
+    "congestion_index"
+  ],
+  "title": "路口 World Status payload（docs/world-status.md §3）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

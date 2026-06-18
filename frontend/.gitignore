@@ -1,0 +1,14 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 本地环境覆盖（.env.example 入库，其余忽略）
+.env
+.env.*
+!.env.example
+
+# Vite 缓存 / 日志 / pid
+.vite/
+*.log
+*.pid

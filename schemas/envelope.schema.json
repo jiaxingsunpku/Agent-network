@@ -1,0 +1,259 @@
+{
+  "$defs": {
+    "EventType": {
+      "description": "envelope.event_type 与 topic/payload 的对应见 docs/protocol.md §3。",
+      "enum": [
+        "observation.traffic.intersection",
+        "status.traffic.intersection",
+        "command",
+        "command.ack",
+        "agent.registered",
+        "agent.deregistered",
+        "agent.heartbeat"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "Quality": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "data_latency_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Data Latency Ms",
+          "type": "integer"
+        }
+      },
+      "title": "Quality",
+      "type": "object"
+    },
+    "Scope": {
+      "additionalProperties": false,
+      "properties": {
+        "site_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Site Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "object_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Id"
+        }
+      },
+      "title": "Scope",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "$ref": "#/$defs/SourceSystem"
+        },
+        "agent_id": {
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "gateway_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gateway Id"
+        }
+      },
+      "required": [
+        "system",
+        "agent_id"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "SourceSystem": {
+      "description": "envelope.source.system（docs/protocol.md §1）。",
+      "enum": [
+        "collaborative_agent",
+        "platform"
+      ],
+      "title": "SourceSystem",
+      "type": "string"
+    },
+    "Target": {
+      "additionalProperties": false,
+      "description": "上行观测/状态留空（两字段皆 None）；命令必填 ``agent_id``。",
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        }
+      },
+      "title": "Target",
+      "type": "object"
+    },
+    "TimeInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "event_ts": {
+          "title": "Event Ts",
+          "type": "string"
+        },
+        "sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        }
+      },
+      "required": [
+        "event_ts"
+      ],
+      "title": "TimeInfo",
+      "type": "object"
+    },
+    "Trace": {
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": {
+          "title": "Trace Id",
+          "type": "string"
+        },
+        "parent_trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Trace Id"
+        }
+      },
+      "required": [
+        "trace_id"
+      ],
+      "title": "Trace",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "统一消息外壳（docs/protocol.md §1）。``payload`` 按 topic 结构不同，\n\n用 :func:`parse_payload` 还原为对应的强类型 payload 模型。",
+  "properties": {
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "message_id": {
+      "title": "Message Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "target": {
+      "$ref": "#/$defs/Target"
+    },
+    "time": {
+      "$ref": "#/$defs/TimeInfo"
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "quality": {
+      "$ref": "#/$defs/Quality"
+    },
+    "trace": {
+      "$ref": "#/$defs/Trace"
+    }
+  },
+  "required": [
+    "message_id",
+    "event_type",
+    "source",
+    "time"
+  ],
+  "title": "ANP Envelope（统一消息外壳，docs/protocol.md §1）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
