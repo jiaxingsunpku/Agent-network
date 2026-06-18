@@ -1,12 +1,14 @@
 """SignalVision Dashboard HTTP API 薄客户端。
 
-只覆盖**感知接入**所需的只读端点（不含 sv.inference.* 控制，那是后续「信号控制」
-任务）。用标准库 ``urllib`` 实现，不引入新依赖（AGENTS.md §5.3）。借鉴老仓库
-``signalvision_kafka_bridge.py`` 的 HTTP 封装思想，但只留只读、拆干净。
+覆盖**感知接入**（只读）与 **P6 信号控制**（写）所需端点。用标准库 ``urllib`` 实现，
+不引入新依赖（AGENTS.md §5.3）。借鉴老仓库 ``signalvision_kafka_bridge.py`` 的 HTTP
+封装思想，但拆干净、契约统一。
 
 真实端点（见 ~/project/SignalVision/dashboard/server.py）：
-  - ``GET /api/simulation/status``：仿真运行状态（心跳用：可达 + running）。
-  - ``GET /api/junctions/<junction_id>``：单路口完整状态（含 incoming_lanes / metrics）。
+  - ``GET  /api/simulation/status``：仿真运行状态（心跳用：可达 + running）。
+  - ``GET  /api/junctions/<junction_id>``：单路口完整状态（含 incoming_lanes / metrics）。
+  - ``POST /api/junctions/<junction_id>/update``：写入 ``traffic_light``（信号控制，P6 执行侧用）
+    / ``lane_data``。注：P5 文档写的 ``sv.inference.*`` 是占位概念，真实 SV 无此端点。
 """
 
 from __future__ import annotations
@@ -53,6 +55,30 @@ class SignalVisionClient:
         except Exception as exc:  # noqa: BLE001 - 网络/超时/解析等都归一为不可达
             return SvResponse(ok=False, status_code=None, body={"message": str(exc)})
 
+    def _post(self, path: str, body: dict[str, Any]) -> SvResponse:
+        url = f"{self.base_url}{path}"
+        data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_sec) as resp:
+                raw = resp.read().decode("utf-8")
+                parsed = json.loads(raw) if raw else {}
+                return SvResponse(ok=True, status_code=resp.status, body=parsed if isinstance(parsed, dict) else {})
+        except urllib.error.HTTPError as exc:
+            text = exc.read().decode("utf-8", errors="replace")[:500]
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = {"message": text}
+            return SvResponse(ok=False, status_code=exc.code, body=parsed if isinstance(parsed, dict) else {})
+        except Exception as exc:  # noqa: BLE001 - 网络/超时/解析等都归一为失败
+            return SvResponse(ok=False, status_code=None, body={"message": str(exc)})
+
     # -- 端点 -------------------------------------------------------------- #
     def get_status(self) -> SvResponse:
         """仿真运行状态（心跳用）。"""
@@ -72,3 +98,27 @@ class SignalVisionClient:
             return None
         junction = resp.body.get("junction")
         return junction if isinstance(junction, dict) else None
+
+    # -- 写端点（P6 信号控制）-------------------------------------------- #
+    def update_junction(
+        self,
+        junction_id: str,
+        *,
+        traffic_light: dict[str, Any] | None = None,
+        lane_data: dict[str, Any] | None = None,
+    ) -> SvResponse:
+        """``POST /api/junctions/<id>/update`` 写信号灯 / 车道数据（信号控制执行侧）。
+
+        ``ok=True`` 表示传输层成功且 SV 返回 ``success``；否则视为执行失败（执行端回 FAILED）。
+        """
+
+        body: dict[str, Any] = {}
+        if traffic_light is not None:
+            body["traffic_light"] = traffic_light
+        if lane_data is not None:
+            body["lane_data"] = lane_data
+        resp = self._post(f"/api/junctions/{junction_id}/update", body)
+        # SV update 端点成功时返回 {"success": true, ...}；HTTP 2xx 但 success=False 视为失败。
+        if resp.ok and not resp.body.get("success", True):
+            return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
+        return resp

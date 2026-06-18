@@ -76,6 +76,8 @@ v1 虚拟交通智能体同时承担感知与执行，统一登记为 `traffic-v
 
 SignalVision 感知接入适配器（P5，见 [adapters.md](adapters.md)）作为纯感知源登记为 `traffic-perception-sv-001`，能力 `perception`，`command_types` 为空。
 
+SignalVision 信号控制执行体（P6，见 [adapters.md](adapters.md) §3）登记为 `traffic-exec-sv-001`，能力 `exec`，`command_types=[set_signal_plan]`。
+
 ## 5. World Status 实体与状态名
 
 状态层每条记录描述一个物理实体的语义状态，实体 id 命名稳定可复用（如路口 `intersection_id`）。具体状态字段（排队长度、流量等）的精确定义见 world-status.md。

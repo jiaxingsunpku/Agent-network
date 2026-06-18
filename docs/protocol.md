@@ -86,6 +86,11 @@
 > 「目标匹配」**上提到去重之前**——非本体命令直接忽略（不回 ack、不进本体去重表），避免别的执行体的
 > `command_id` 污染本体去重表。对寻址到本体的命令，处理顺序与上面一致，观测语义不变。去重表为内存集合，
 > 但可由重放本体既往 ack（`rebuild_dedup_from_acks`）重建，满足 §6「去重表应可重建」。
+>
+> 实现注（P6，`anp/adapters/signalvision/executor.py:SignalVisionExecutor`）：第二个执行体，遵循同一
+> 处理顺序，在 Safety Guard 之后多一步**路由约束**——命令 `scope.object_id` 须映射到某外部 junction，
+> 否则 `rejected`；映射成功后调真实 SV 写端点，HTTP 失败 → `failed`。参数级 Safety Guard 规则（合法相位、
+> 时长区间）与虚拟体共用单一来源 `anp/control.py`，避免多执行体规则分叉（AGENTS.md §7.3）。
 
 **ack status 枚举**：`accepted | completed | rejected | duplicate | expired | failed`。
 

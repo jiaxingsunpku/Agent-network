@@ -6,21 +6,24 @@ topic/agent id 见 [naming.md](naming.md)。
 
 ## 1. 适配器是什么 / 不是什么
 
-适配器把**某个外部数据源的原生结构**映射成 `anp.contracts` 的**按方向原始观测**，
-经统一 envelope builder 发布到感知层 topic，对平台而言它就是一个感知智能体。
+适配器把**某个外部数据源的原生结构**映射成 `anp.contracts` 的统一契约：感知侧映射成
+**按方向原始观测**发布到感知层 topic；执行侧把契约命令映射成该源的控制调用并回 ack。
+对平台而言它就是一个感知 / 执行智能体。
 
-- **做**：HTTP/SDK 接入外部源、字段与单位映射、按契约装配观测、注册/心跳/下线。
-- **不做**：在适配器里散搓 envelope（一律走 `observation_envelope`）；计算 World Status
-  （排队/流量/延误/拥堵等共识指标一律由系统级智能体算，AGENTS.md §3.2）；命令控制。
+- **做**：HTTP/SDK 接入外部源、字段与单位映射、按契约装配观测、注册/心跳/下线；
+  （执行侧）订阅命令 → 去重/过期/目标匹配/本地 Safety Guard → 调外部源控制接口 → 回 ack。
+- **不做**：在适配器里散搓 envelope（一律走 `observation_envelope` / `ack_envelope`）；计算
+  World Status（排队/流量/延误/拥堵等共识指标一律由系统级智能体算，AGENTS.md §3.2）。
 
-每个外部源一个子包，互不耦合。当前落地：`signalvision/`（交通推理系统，仅感知侧）。
+每个外部源一个子包，互不耦合。当前落地：`signalvision/`——**感知侧**（§2）+ **执行侧**
+（§3 信号控制，P6），同子包、职责分离、共用 client。
 
 ## 2. SignalVision 感知适配器
 
 ### 2.1 数据源
 
 真实 SV Dashboard（`~/project/SignalVision/dashboard/server.py`）暴露 HTTP API。
-本适配器只用**只读**端点（控制端点 `sv.inference.*` 属后续「信号控制」任务，本期不做）：
+**感知侧**只用只读端点（写端点见 §3 执行侧）：
 
 | 端点 | 用途 |
 |---|---|
@@ -117,8 +120,66 @@ World Status）；run 脚本注册/降级/下线接线正常。
 **未验证风险**：未对接**真实** SV Dashboard 实测（本机未跑、启动要拉 SUMO，属独立重项目）；
 真实 `lane_id` 是否编码罗盘方向、`total_vehicles_passed` 单调性等需真实接入时复核。
 
-## 3. 后续（不在本期）
+## 3. SignalVision 执行 adapter（信号控制，P6）
 
-- 命令控制闭环（`sv.inference.start/stop/status/snapshot` 调 SV API + 本地 Safety Guard + ack）
-  = 会议「信号控制」任务。
+感知侧的对偶：把契约下行命令映射成 SV 控制调用，完成「命令下行 → 执行 → ack」闭环。
+
+> **纠正**：P5 文档曾把后续控制写成 `sv.inference.start/stop/status/snapshot`——这是占位
+> 概念，**真实 SV 无此端点**。真实可用的信号控制入口是下面的 `POST .../update`。
+
+### 3.1 数据源（写端点）
+
+| 端点 | 用途 |
+|---|---|
+| `POST /api/junctions/<junction_id>/update` | 写 `traffic_light{phase_state, phase_duration, next_switch_time}`（信号控制）/ `lane_data` |
+
+### 3.2 命令语义与映射（单相位覆盖，P6）
+
+复用既有 `set_signal_plan` 命令（**契约零改**），params 形态 `{desired_phase, duration_s}`：
+
+| 契约 params | SV `/update` traffic_light | 说明 |
+|---|---|---|
+| `desired_phase`（符号名，如 `north_south_green`） | `phase_state` | 经 `phase_state_map` 可覆盖为 SV 相位串，默认透传符号名 |
+| `duration_s` | `next_switch_time` | 本相位 `duration_s` 秒后切换 |
+| —（新设相位） | `phase_duration = 0.0` | 当前相位已持续 0 |
+
+- **目标路由**：命令 `scope.object_id`（intersection_id）经 `junction_map`（与感知侧同向：
+  SV junction → 平台 intersection）**反查**目标 SV junction；未映射 → Safety Guard 拒绝。
+- **Safety Guard**：参数级规则（合法相位集合、`duration_s ∈ [5,120]`）来自 `anp.control`
+  （单一来源，与 v1 虚拟体共用，避免分叉）；执行体在其上叠加路由约束。权威安全闭环在执行端
+  （protocol.md §7）。处理顺序：去重 → 过期 → 目标匹配 → Safety Guard → 路由 → 调 SV → ack。
+- **完整多相位配时**（周期/绿信比/相位序列）本遍不做，params schema 留扩展空间。
+
+### 3.3 身份与模块
+
+- agent_id：`traffic-exec-sv-001`（[naming.md](naming.md) §4，role=`exec`）；agent_type `signalvision`；
+  capabilities `["exec"]`；command_types `["set_signal_plan"]`。靠 lifecycle 注册（不入 registry seed，
+  与感知体一致）。
+- `client.py` 加 `update_junction` 写端点；`config.py` 加 `SignalVisionExecConfig`；新增 `executor.py`
+  （`SignalVisionExecutor` + exec lifecycle/heartbeat）。
+- 命令订阅 `anp.traffic.command.v1`，ack 发布 `anp.traffic.ack.v1`，心跳携 SV 可达性。
+
+### 3.4 运行与验证
+
+```bash
+# 运行执行体（接真实 SV Dashboard；配合 run_gateway.py + 感知源端到端跑通命令闭环）
+python backend/scripts/run_signalvision_exec.py --sv-base-url http://127.0.0.1:8080 \
+    --junction intersection_1_1 --intersection gg-xiongchu-minzu
+# 端到端命令闭环冒烟（桩 SV /update + 真实 Kafka command/ack；需 Kafka）
+python backend/scripts/smoke_signalvision_exec.py
+# 单测（Safety Guard / 映射 / 去重/过期/目标/路由/失败分支，无 Kafka/HTTP）
+cd backend && pytest tests/test_signalvision_exec.py -q
+```
+
+**已验证**：单测全绿；桩 SV 端到端命令闭环冒烟 PASS（completed/rejected×2/expired/duplicate/ignored
+全分支 + SV 写端点收到映射后的 traffic_light）；run 脚本注册/降级（SV 不可达 heartbeat degraded）/下线接线正常。
+**未验证风险**：未对接**真实** SV 实测——① `phase_state` 真实编码（SUMO 相位串）需配 `phase_state_map`；
+② `/update` 写的是全局 `junction_manager`，**仿真运行时可能不驱动 SUMO**（读详情优先取
+`simulation_manager.get_junction_manager()`，server.py:251），故「命令→效果经感知回流」的真实闭环
+在 SUMO 上可能合不拢，本遍只验证桩闭环。
+
+## 4. 后续（不在本期）
+
+- 完整多相位配时调度（周期/绿信比/相位序列）；真实 SV/SUMO 闭环实测。
+- 视频流迁移、路口预测（会议另两件任务，AGENTS.md §1.4，另开任务）。
 - 其余外部源适配器按本文骨架另起子包。

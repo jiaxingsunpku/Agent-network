@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 SV_ADAPTER_AGENT_ID = "traffic-perception-sv-001"
 #: agent_type：沿用老仓库 bridge 的数据源标识，便于 registry/UI 区分来源。
 SV_ADAPTER_AGENT_TYPE = "signalvision"
+#: P6 信号控制执行体 ID（role=exec，与感知体同属 SV 接入家族；docs/naming.md §4）。
+SV_EXEC_AGENT_ID = "traffic-exec-sv-001"
 #: 默认 SV junction → 平台 intersection_id 映射（与网关拓扑 `gg-xiongchu-minzu` 对齐）。
 DEFAULT_JUNCTION_MAP: dict[str, str] = {"intersection_1_1": "gg-xiongchu-minzu"}
 
@@ -43,3 +45,25 @@ class SignalVisionAdapterConfig:
     #: 站点/区域（仅信息性，网关按 object_id=intersection_id 取数）。
     site_id: str | None = "signalvision-dashboard"
     region_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SignalVisionExecConfig:
+    """SignalVision 信号控制**执行侧** adapter 的运行参数（P6）。
+
+    执行体订阅控制层命令、调 SV 写端点。命令 `scope.object_id`（intersection_id）经
+    `junction_map`（与感知侧同向：SV junction → 平台 intersection）反查目标 SV junction。
+    """
+
+    agent_id: str = SV_EXEC_AGENT_ID
+    agent_type: str = SV_ADAPTER_AGENT_TYPE
+    #: SV Dashboard HTTP API 根地址（真实接入时覆盖）。
+    sv_base_url: str = "http://127.0.0.1:8080"
+    http_timeout_sec: float = 3.0
+    #: SV junction_id → 平台 intersection_id（与感知侧同向，执行时反查）。
+    junction_map: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_JUNCTION_MAP))
+    #: 符号相位名（desired_phase）→ SV phase_state 串映射。空 = 透传符号名。
+    #: 真实接入若 SV 用 SUMO 相位串编码，在此配置覆盖（docs/adapters.md §4）。
+    phase_state_map: dict[str, str] = field(default_factory=dict)
+    #: 心跳间隔（秒）。执行体定期上报，携 SV 可达性。
+    heartbeat_interval_sec: float = 5.0

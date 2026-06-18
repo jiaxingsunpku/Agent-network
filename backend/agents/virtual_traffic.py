@@ -41,6 +41,7 @@ from anp.contracts import (
     parse_iso,
     parse_payload,
 )
+from anp.control import signal_plan_safety_decision
 from anp.messaging import make_consumer, make_producer, publish
 
 VIRTUAL_AGENT_ID = "traffic-virtual-001"
@@ -52,10 +53,8 @@ DEFAULT_HEARTBEAT_SEC = 5.0
 AGENT_CAPABILITIES = ("perception", "exec")
 AGENT_COMMAND_TYPES = (CommandType.SET_SIGNAL_PLAN.value,)
 
-#: 执行端本地 Safety Guard 参数（set_signal_plan）。权威安全闭环在执行端（protocol.md §7）。
-ALLOWED_SIGNAL_PHASES = ("north_south_green", "east_west_green", "all_red")
-MIN_SIGNAL_DURATION_SEC = 5
-MAX_SIGNAL_DURATION_SEC = 120
+#: 执行端本地 Safety Guard 规则（合法相位/时长区间）单一来源在 :mod:`anp.control`
+#: （与 SV 执行体共用，避免分叉，AGENTS.md §7.3）。权威安全闭环仍在执行端（protocol.md §7）。
 
 #: 自由流速度（m/s），与系统级 V_FREE_KMH=40 对齐（40/3.6）。
 _V_FREE_MPS = 40.0 / 3.6
@@ -213,30 +212,9 @@ class VirtualTrafficExecutor:
 
     # -- 本地 Safety Guard ------------------------------------------------- #
     def safety_guard(self, payload: CommandPayload) -> SafetyDecision:
-        """命令类型白名单 + 参数范围校验（set_signal_plan）。"""
+        """命令类型白名单 + 参数范围校验（set_signal_plan）。规则见 :mod:`anp.control`（单一来源）。"""
 
-        if payload.command_type != CommandType.SET_SIGNAL_PLAN:
-            return SafetyDecision(
-                allowed=False, decision="reject", reason=f"不支持的命令类型: {payload.command_type}"
-            )
-        params = payload.params or {}
-        phase = params.get("desired_phase")
-        if phase not in ALLOWED_SIGNAL_PHASES:
-            return SafetyDecision(
-                allowed=False,
-                decision="reject",
-                reason=f"desired_phase 非法（允许 {list(ALLOWED_SIGNAL_PHASES)}）: {phase!r}",
-            )
-        duration = params.get("duration_s")
-        if not isinstance(duration, (int, float)) or isinstance(duration, bool):
-            return SafetyDecision(allowed=False, decision="reject", reason="duration_s 必须是数值")
-        if not (MIN_SIGNAL_DURATION_SEC <= duration <= MAX_SIGNAL_DURATION_SEC):
-            return SafetyDecision(
-                allowed=False,
-                decision="reject",
-                reason=f"duration_s 须在 [{MIN_SIGNAL_DURATION_SEC}, {MAX_SIGNAL_DURATION_SEC}]: {duration}",
-            )
-        return SafetyDecision(allowed=True, decision="allow", reason="通过本地 Safety Guard")
+        return signal_plan_safety_decision(payload)
 
     def _execute(self, payload: CommandPayload) -> None:
         """应用信号配时（v1 无真实设备：仅记录最近配时）。"""
