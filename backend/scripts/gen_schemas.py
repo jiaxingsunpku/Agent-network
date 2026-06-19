@@ -22,6 +22,7 @@ from anp.contracts import (
     Envelope,
     IntersectionStatusPayload,
     ObservationPayload,
+    VideoTextEventPayload,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,7 @@ SCHEMAS_DIR = REPO_ROOT / "schemas"
 TARGETS = {
     "envelope.schema.json": (Envelope, "ANP Envelope（统一消息外壳，docs/protocol.md §1）"),
     "observation.schema.json": (ObservationPayload, "交通路口观测 payload（docs/world-status.md §2）"),
+    "video_text.schema.json": (VideoTextEventPayload, "视频文本事件 payload（docs/video.md）"),
     "status.intersection.schema.json": (
         IntersectionStatusPayload,
         "路口 World Status payload（docs/world-status.md §3）",

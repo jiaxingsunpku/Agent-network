@@ -1,0 +1,98 @@
+[
+  {
+    "event_ts": "2026-06-13T05:30:00.000Z",
+    "camera_id": "cam-minzu-east-001",
+    "road_name": "民族大道",
+    "intersection_id": "gg-xiongchu-minzu",
+    "text": "民族大道与雄楚大道交叉口东进口发生两车追尾，右侧车道被占用，后方车辆排队缓行约 150 米。",
+    "summary": "民族大道路口两车追尾，东进口占道缓行",
+    "category": "事故",
+    "tags": ["事故", "追尾", "占道"],
+    "confidence": 0.92,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-13T06:10:00.000Z",
+    "camera_id": "cam-minzu-east-001",
+    "road_name": "民族大道",
+    "intersection_id": "gg-xiongchu-minzu",
+    "text": "事故现场清理后，民族大道东进口车流恢复，仍有轻微拥堵，平均车速约 15km/h。",
+    "summary": "民族大道事故清理后仍轻微拥堵",
+    "category": "拥堵",
+    "tags": ["拥堵", "缓行"],
+    "confidence": 0.85,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-13T01:05:00.000Z",
+    "camera_id": "cam-minzu-west-002",
+    "road_name": "民族大道",
+    "intersection_id": "gg-xiongchu-minzu",
+    "text": "民族大道西进口一辆电动车闯红灯，险些与右转车辆发生碰撞。",
+    "summary": "民族大道西进口电动车闯红灯",
+    "category": "违章",
+    "tags": ["违章", "闯红灯"],
+    "confidence": 0.78,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-13T07:20:00.000Z",
+    "camera_id": "cam-xiongchu-north-003",
+    "road_name": "雄楚大道",
+    "intersection_id": "gg-xiongchu-luxiang",
+    "text": "雄楚大道北进口一辆货车抛锚停在最内侧车道，占用一条车道，交警已到场处理。",
+    "summary": "雄楚大道货车抛锚占道",
+    "category": "事故",
+    "tags": ["抛锚", "占道"],
+    "confidence": 0.81,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-13T03:40:00.000Z",
+    "camera_id": "cam-xiongchu-north-003",
+    "road_name": "雄楚大道",
+    "intersection_id": "gg-xiongchu-luxiang",
+    "text": "雄楚大道交通平稳，各方向车流通畅，未见明显排队。",
+    "summary": "雄楚大道交通通畅",
+    "category": null,
+    "tags": ["通畅"],
+    "confidence": 0.9,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-12T05:30:00.000Z",
+    "camera_id": "cam-minzu-east-001",
+    "road_name": "民族大道",
+    "intersection_id": "gg-xiongchu-minzu",
+    "text": "民族大道东进口一辆小轿车追尾前车，未造成人员受伤，双方自行撤离。",
+    "summary": "民族大道前一日追尾事故（已撤离）",
+    "category": "事故",
+    "tags": ["事故", "追尾"],
+    "confidence": 0.88,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-13T22:15:00.000Z",
+    "camera_id": "cam-minzu-east-001",
+    "road_name": "民族大道",
+    "intersection_id": "gg-xiongchu-minzu",
+    "text": "民族大道夜间车流稀少，路面湿滑，提醒车辆减速慢行。",
+    "summary": "民族大道夜间路面湿滑",
+    "category": "积水",
+    "tags": ["夜间", "湿滑"],
+    "confidence": 0.7,
+    "source_model": "vlm-traffic-v1"
+  },
+  {
+    "event_ts": "2026-06-14T05:30:00.000Z",
+    "camera_id": "cam-minzu-east-001",
+    "road_name": "民族大道",
+    "intersection_id": "gg-xiongchu-minzu",
+    "text": "民族大道东进口正在进行路面施工，临时封闭一条车道，车辆缓慢通行。",
+    "summary": "民族大道施工临时封道",
+    "category": "施工",
+    "tags": ["施工", "封道"],
+    "confidence": 0.83,
+    "source_model": "vlm-traffic-v1"
+  }
+]

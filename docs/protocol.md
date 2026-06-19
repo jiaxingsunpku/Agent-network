@@ -55,6 +55,7 @@
 | `anp.traffic.ack.v1` | `command.ack` | `command_id`、`command_type`、`status`、`safety{}` |
 | `anp.traffic.agent.lifecycle.v1` | `agent.registered` / `agent.deregistered` | `agent_id`、`agent_type`、`capabilities[]`、`command_types[]` |
 | `anp.traffic.agent.heartbeat.v1` | `agent.heartbeat` | `status`、`last_error`、角色相关健康字段 |
+| `anp.video.perception.text.v1` | `observation.video.text` | 视频文本事件（`camera_id`、`road_name`/`intersection_id`、`text`、`category` 等，见 video.md §3）；P7 |
 
 ## 4. 发布订阅规则
 

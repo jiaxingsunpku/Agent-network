@@ -10,7 +10,7 @@
 |---|---|---|
 | `traffic` | 交通管控 World Model | 本期落地 |
 | `mine` | 矿区安全管控 World Model | 预留，本期不做 |
-| `video` | 视频监控 World Model | 预留，本期不做 |
+| `video` | 视频监控 World Model（事件文本问答） | 本期落地（P7，见 [video.md](video.md)） |
 
 逻辑 World Model 的展示名（如「交通管控 World Model」）只用于 UI 与文档，不进 topic / id。
 
@@ -49,6 +49,15 @@ anp.traffic.agent.heartbeat.v1            # 智能体心跳
 
 原则：**不要每个 agent 一个 topic**。同一层、同一类信号共用 topic，用 partition key 与 payload 字段区分实体。
 
+### 视频域 v1 Topic 清单（P7）
+
+```
+anp.video.perception.text.v1              # 视频大模型处理后的文本事件（原始视频不进 Kafka）
+anp.video.dlq.v1                          # 预留
+```
+
+视频域一阶段只用感知层（文本事件上行），无状态层/控制层（无共识聚合、无下行命令）。详见 [video.md](video.md)。
+
 ## 3. Partition Key
 
 分区键统一用**实体 id**（多数情况是 `agent_id`，状态层用被聚合的物理实体 id，如 `intersection_id`），保证同一实体的消息有序，便于窗口聚合与回放。
@@ -77,6 +86,8 @@ v1 虚拟交通智能体同时承担感知与执行，统一登记为 `traffic-v
 SignalVision 感知接入适配器（P5，见 [adapters.md](adapters.md)）作为纯感知源登记为 `traffic-perception-sv-001`，能力 `perception`，`command_types` 为空。
 
 SignalVision 信号控制执行体（P6，见 [adapters.md](adapters.md) §3）登记为 `traffic-exec-sv-001`，能力 `exec`，`command_types=[set_signal_plan]`。
+
+视频域（P7，见 [video.md](video.md)）：视频感知体 `video-perception-001`（role=perception，发文本事件）；视频问答任务体 `video-task-001`（role=task，检索+合成）。
 
 ## 5. World Status 实体与状态名
 

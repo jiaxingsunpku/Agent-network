@@ -36,6 +36,50 @@ def test_observation_roundtrip_via_json():
     assert back.schema_version == c.SCHEMA_VERSION
 
 
+def _video_text() -> c.VideoTextEventPayload:
+    return c.VideoTextEventPayload(
+        camera_id="cam-minzu-001",
+        road_name="民族大道",
+        intersection_id="gg-xiongchu-minzu",
+        text="民族大道与雄楚大道交叉口东进口发生两车追尾，占用一条车道，车辆缓行。",
+        summary="民族大道路口追尾事故",
+        category="事故",
+        tags=["事故", "追尾"],
+    )
+
+
+def test_video_text_roundtrip_via_json():
+    env = c.video_text_envelope(
+        agent_id="video-perception-001",
+        payload=_video_text(),
+        event_ts="2026-06-13T06:30:00.000Z",
+    )
+    back = c.Envelope.model_validate_json(json.dumps(env.to_wire()))
+    payload = c.parse_payload(back)
+    assert isinstance(payload, c.VideoTextEventPayload)
+    assert payload.road_name == "民族大道"
+    assert payload.category == "事故"
+    assert back.event_type == c.EventType.OBSERVATION_VIDEO_TEXT
+    # 感知层（视频域）按 source.agent_id 分区
+    assert c.partition_key(env) == "video-perception-001"
+    # scope.object_id 默认取路口标识，便于按实体追踪
+    assert back.scope.object_id == "gg-xiongchu-minzu"
+
+
+def test_video_text_requires_text_and_camera():
+    with pytest.raises(ValidationError):
+        c.VideoTextEventPayload(camera_id="cam-1", text="")
+    with pytest.raises(ValidationError):
+        c.VideoTextEventPayload(camera_id="", text="something")
+
+
+def test_video_text_extra_fields_forbidden():
+    with pytest.raises(ValidationError):
+        c.VideoTextEventPayload.model_validate(
+            {"camera_id": "c", "text": "t", "event_type": "事故"}  # event_type 属 envelope，payload 用 category
+        )
+
+
 def test_partition_key_rules():
     obs_env = c.observation_envelope(agent_id="traffic-virtual-001", payload=_obs())
     # 感知层按 agent_id 分区
@@ -86,6 +130,7 @@ def test_confidence_bounds():
     [
         ("envelope.schema.json", c.Envelope),
         ("observation.schema.json", c.ObservationPayload),
+        ("video_text.schema.json", c.VideoTextEventPayload),
         ("status.intersection.schema.json", c.IntersectionStatusPayload),
         ("command.schema.json", c.CommandPayload),
         ("ack.schema.json", c.AckPayload),

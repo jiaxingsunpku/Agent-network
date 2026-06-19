@@ -5,6 +5,7 @@
       "enum": [
         "observation.traffic.intersection",
         "status.traffic.intersection",
+        "observation.video.text",
         "command",
         "command.ack",
         "agent.registered",

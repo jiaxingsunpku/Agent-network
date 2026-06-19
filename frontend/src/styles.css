@@ -3351,3 +3351,77 @@ button {
   color: var(--muted);
 }
 
+
+/* ── 视频事件问答面板（P7）──────────────────────────────────────────── */
+.video-qa {
+  margin: 8px 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.video-qa-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #0f172a;
+  background: rgba(37, 99, 235, 0.06);
+}
+.video-qa-summary::-webkit-details-marker { display: none; }
+.video-qa-body { padding: 12px 14px; }
+.video-qa-form { display: flex; flex-direction: column; gap: 8px; }
+.video-qa-question {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.video-qa-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.video-qa-filters label {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 11px; color: var(--muted);
+}
+.video-qa-filters input {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit; font-size: 12px;
+}
+.video-qa-submit {
+  border: none; border-radius: 6px;
+  background: var(--blue); color: #fff;
+  padding: 7px 16px; font-size: 13px; cursor: pointer;
+}
+.video-qa-submit:disabled { opacity: 0.6; cursor: default; }
+.video-qa-error {
+  margin-top: 10px; padding: 8px 10px;
+  border-radius: 6px; font-size: 12px;
+  color: var(--rose); background: rgba(219, 39, 119, 0.08);
+}
+.video-qa-result { margin-top: 12px; }
+.video-qa-answer {
+  white-space: pre-wrap;
+  font-size: 13px; line-height: 1.6;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(22, 163, 74, 0.06);
+  border: 1px solid rgba(22, 163, 74, 0.2);
+}
+.video-qa-warnings {
+  margin-top: 6px; font-size: 11px; color: var(--amber);
+}
+.video-qa-evidence-head {
+  margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted);
+}
+.video-qa-evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.video-qa-evi {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.video-qa-evi-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.video-qa-evi-meta .evi-cat { color: var(--rose); font-weight: 600; }
+.video-qa-evi-meta .evi-time { color: #0f172a; font-weight: 600; }
+.video-qa-evi-text { font-size: 12.5px; line-height: 1.5; color: #1e293b; }

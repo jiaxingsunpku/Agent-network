@@ -47,6 +47,14 @@ def main() -> int:
         print("[gateway] 后台消费已启动：status / ack / registry")
 
     app = create_app(state)
+
+    # P7：把视频文本问答路由 co-host 到网关进程（前端复用现有 /api/* 反代）。
+    # 逻辑独立在 anp/video，不混入交通域世界状态计算（AGENTS.md §3.4）。
+    from anp.video.routes import include_video_routes  # noqa: E402
+
+    vstore, _ = include_video_routes(app)
+    print(f"[gateway] 已挂载视频文本问答 /api/agent-network/video-text/*（库内 {vstore.count()} 条）")
+
     print(f"[gateway] 监听 http://{args.host}:{args.port}/api/agent-network …")
     try:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")

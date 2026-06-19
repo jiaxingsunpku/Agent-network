@@ -1,0 +1,149 @@
+{
+  "additionalProperties": false,
+  "description": "视频大模型处理后的「文本事件」（docs/video.md）。\n\n语义：视频智能体作为感知体上报，**原始视频不进 Kafka**。envelope 已承载\n``message_id`` / ``source.agent_id`` / ``time.event_ts`` / ``quality.confidence``，\n本 payload 只放视频特有字段，不重复 envelope（docs/naming.md §6）。",
+  "properties": {
+    "observation_type": {
+      "const": "video.text",
+      "default": "video.text",
+      "title": "Observation Type",
+      "type": "string"
+    },
+    "camera_id": {
+      "minLength": 1,
+      "title": "Camera Id",
+      "type": "string"
+    },
+    "road_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Road Name"
+    },
+    "intersection_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Intersection Id"
+    },
+    "road_segment": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Road Segment"
+    },
+    "start_ts": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Ts"
+    },
+    "end_ts": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "End Ts"
+    },
+    "text": {
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary"
+    },
+    "category": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Category"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "entities": {
+      "additionalProperties": true,
+      "title": "Entities",
+      "type": "object"
+    },
+    "artifact_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Ref"
+    },
+    "source_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Model"
+    }
+  },
+  "required": [
+    "camera_id",
+    "text"
+  ],
+  "title": "视频文本事件 payload（docs/video.md）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

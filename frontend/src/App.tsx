@@ -4,6 +4,7 @@ import { ModelIntroPanel } from "./components/ModelIntroPanel";
 import { InspectorPanel } from "./components/InspectorPanel";
 import { getToolsForModel, ToolWorkspace } from "./components/ToolWorkspace";
 import { TopBar } from "./components/TopBar";
+import { VideoQAPanel } from "./components/VideoQAPanel";
 import { worldModels } from "./data/worldModels";
 import { useSimulatedSnapshot } from "./hooks/useSimulatedSnapshot";
 import { AgentNode, SelectionRef } from "./types";
@@ -87,6 +88,7 @@ export default function App() {
               </button>
             ))}
           </div>
+          <VideoQAPanel />
           <div className="stage-wrap gateway-stage">
             {activeWorldModel && (
               <ToolWorkspace

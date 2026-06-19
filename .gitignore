@@ -23,6 +23,9 @@ backend/.venv/
 *.log
 *.pid
 
+# 本地数据（P7 视频文本事件库 SQLite 等，不入库）
+backend/.data/
+
 # 前端（迁移后由 frontend/.gitignore 细化）
 node_modules/
 frontend/dist/

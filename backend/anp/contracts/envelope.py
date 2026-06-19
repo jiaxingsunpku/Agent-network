@@ -21,6 +21,7 @@ from .payloads import (
     CommandPayload,
     IntersectionStatusPayload,
     ObservationPayload,
+    VideoTextEventPayload,
 )
 
 #: envelope.schema_version（docs/protocol.md §1）。不兼容变更才升主版本。
@@ -165,6 +166,7 @@ class Envelope(_Frame):
 _PAYLOAD_BY_EVENT: dict[EventType, type[BaseModel]] = {
     EventType.OBSERVATION_TRAFFIC_INTERSECTION: ObservationPayload,
     EventType.STATUS_TRAFFIC_INTERSECTION: IntersectionStatusPayload,
+    EventType.OBSERVATION_VIDEO_TEXT: VideoTextEventPayload,
     EventType.COMMAND: CommandPayload,
     EventType.COMMAND_ACK: AckPayload,
     EventType.AGENT_REGISTERED: AgentLifecyclePayload,
@@ -245,6 +247,41 @@ def observation_envelope(
         source=Source(system=SourceSystem.COLLABORATIVE_AGENT, agent_id=agent_id),
         payload=payload,
         scope=Scope(site_id=site_id, region_id=region_id, object_id=payload.intersection_id),
+        event_ts=event_ts,
+        sequence=sequence,
+        quality=quality,
+        trace=trace,
+        message_id=message_id,
+    )
+
+
+def video_text_envelope(
+    *,
+    agent_id: str,
+    payload: VideoTextEventPayload,
+    site_id: str | None = None,
+    region_id: str | None = None,
+    object_id: str | None = None,
+    event_ts: str | None = None,
+    sequence: int = 0,
+    quality: Quality | None = None,
+    trace: Trace | None = None,
+    message_id: str | None = None,
+) -> Envelope:
+    """视频感知体上报文本事件（topic anp.video.perception.text.v1，docs/video.md）。
+
+    ``scope.object_id`` 默认取路口/路段/摄像头之一，保证同一实体消息分区稳定。
+    """
+
+    return make_envelope(
+        event_type=EventType.OBSERVATION_VIDEO_TEXT,
+        source=Source(system=SourceSystem.COLLABORATIVE_AGENT, agent_id=agent_id),
+        payload=payload,
+        scope=Scope(
+            site_id=site_id,
+            region_id=region_id,
+            object_id=object_id or payload.intersection_id or payload.road_name or payload.camera_id,
+        ),
         event_ts=event_ts,
         sequence=sequence,
         quality=quality,

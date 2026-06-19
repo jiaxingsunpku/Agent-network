@@ -29,6 +29,8 @@ class EventType(str, Enum):
 
     OBSERVATION_TRAFFIC_INTERSECTION = "observation.traffic.intersection"
     STATUS_TRAFFIC_INTERSECTION = "status.traffic.intersection"
+    #: P7 视频域：视频大模型处理后的文本事件（docs/video.md）。
+    OBSERVATION_VIDEO_TEXT = "observation.video.text"
     COMMAND = "command"
     COMMAND_ACK = "command.ack"
     AGENT_REGISTERED = "agent.registered"

@@ -14,10 +14,12 @@ TOPIC_PREFIX = "anp"
 
 
 class Domain(str, Enum):
-    """协同任务域（一个域 = 一个 World Model）。本期只落地 traffic。"""
+    """协同任务域（一个域 = 一个 World Model）。"""
 
     TRAFFIC = "traffic"
-    # MINE / VIDEO 预留，本期不做（见 docs/naming.md §1）。
+    #: P7：视频监控 World Model（事件文本问答），见 docs/video.md。
+    VIDEO = "video"
+    # MINE 预留，本期不做（见 docs/naming.md §1）。
 
 
 class Layer(str, Enum):
@@ -68,4 +70,22 @@ ALL_TRAFFIC_TOPICS: tuple[str, ...] = (
     TrafficTopics.AGENT_LIFECYCLE,
     TrafficTopics.AGENT_HEARTBEAT,
     TrafficTopics.DLQ,
+)
+
+
+class VideoTopics:
+    """视频域 v1 topic 清单（P7，docs/naming.md §2「视频域 v1 Topic 清单」）。
+
+    语义：视频智能体作为感知体，把视频大模型处理后的「文本事件」发到感知层 topic；
+    原始视频不进 Kafka。状态层/控制层本阶段不做（无共识聚合、无下行命令）。
+    """
+
+    PERCEPTION_TEXT = build_topic(Domain.VIDEO, Layer.PERCEPTION, "text")
+    DLQ = build_topic(Domain.VIDEO, Layer.DLQ)  # 预留
+
+
+#: P7 一阶段需要建立的视频域 topic。
+ALL_VIDEO_TOPICS: tuple[str, ...] = (
+    VideoTopics.PERCEPTION_TEXT,
+    VideoTopics.DLQ,
 )

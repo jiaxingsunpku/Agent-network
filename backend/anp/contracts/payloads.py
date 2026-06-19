@@ -42,6 +42,42 @@ class ObservationPayload(_Strict):
 
 
 # --------------------------------------------------------------------------- #
+# 感知层（视频域）：视频文本事件 payload（topic anp.video.perception.text.v1，P7）
+# --------------------------------------------------------------------------- #
+class VideoTextEventPayload(_Strict):
+    """视频大模型处理后的「文本事件」（docs/video.md）。
+
+    语义：视频智能体作为感知体上报，**原始视频不进 Kafka**。envelope 已承载
+    ``message_id`` / ``source.agent_id`` / ``time.event_ts`` / ``quality.confidence``，
+    本 payload 只放视频特有字段，不重复 envelope（docs/naming.md §6）。
+    """
+
+    observation_type: Literal["video.text"] = "video.text"
+    #: 视频源/摄像头标识。
+    camera_id: str = Field(min_length=1)
+    #: 路段/路口标识（按路段提问的依据）；road_name 与 intersection_id 至少应有其一。
+    road_name: str | None = None
+    intersection_id: str | None = None
+    road_segment: str | None = None
+    #: 视频片段时间范围（可选；事件权威时间走 envelope.time.event_ts）。
+    start_ts: str | None = None  # ISO8601 UTC，带 Z
+    end_ts: str | None = None
+    #: 视频大模型产出的文本描述（检索主体，必填）。
+    text: str = Field(min_length=1)
+    #: 短摘要（可选，便于命中与展示）。
+    summary: str | None = None
+    #: 事件类别（拥堵/事故/违章…，自由字符串）。命名避免与 envelope.event_type 撞名。
+    category: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    #: 结构化抽取（目标类型/计数/车牌等，自由 dict）。
+    entities: dict[str, Any] = Field(default_factory=dict)
+    #: 视频片段指针（对象存储 URL/路径等），只存指针不存视频。
+    artifact_ref: str | None = None
+    #: 产出该文本的视频模型名（可选，溯源用）。
+    source_model: str | None = None
+
+
+# --------------------------------------------------------------------------- #
 # 状态层：路口 World Status payload（topic anp.traffic.status.intersection.v1）
 # --------------------------------------------------------------------------- #
 class StatusWindow(_Strict):

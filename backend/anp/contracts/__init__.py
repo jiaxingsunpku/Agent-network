@@ -38,6 +38,7 @@ from .envelope import (
     parse_payload,
     partition_key,
     status_envelope,
+    video_text_envelope,
 )
 from .payloads import (
     AckPayload,
@@ -50,13 +51,16 @@ from .payloads import (
     ObservationPayload,
     SafetyDecision,
     StatusWindow,
+    VideoTextEventPayload,
 )
 from .topics import (
     ALL_TRAFFIC_TOPICS,
+    ALL_VIDEO_TOPICS,
     TOPIC_PREFIX,
     Domain,
     Layer,
     TrafficTopics,
+    VideoTopics,
     build_topic,
 )
 
@@ -90,6 +94,7 @@ __all__ = [
     "make_envelope",
     "observation_envelope",
     "status_envelope",
+    "video_text_envelope",
     "command_envelope",
     "ack_envelope",
     "parse_payload",
@@ -100,6 +105,7 @@ __all__ = [
     "IntersectionStatusPayload",
     "StatusWindow",
     "ApproachStatus",
+    "VideoTextEventPayload",
     "CommandPayload",
     "SafetyDecision",
     "AckPayload",
@@ -112,4 +118,6 @@ __all__ = [
     "build_topic",
     "TrafficTopics",
     "ALL_TRAFFIC_TOPICS",
+    "VideoTopics",
+    "ALL_VIDEO_TOPICS",
 ]

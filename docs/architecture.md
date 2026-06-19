@@ -102,7 +102,8 @@ GET  /api/agent-network/timeseries/*      # 冷路径，本期返回「未启用
 - **P2** 系统级智能体 + 虚拟感知体，产出真实 World Status。
 - **P3** 网关读模型 + 命令入口，契约对齐前端。
 - **P4** 迁移前端，指向新网关，端到端跑通（非 mock）。
-- **P5** 真实 SignalVision adapter：**感知接入已落地**（`adapters/signalvision/`，见 [adapters.md](adapters.md)）；命令控制闭环（信号控制）/ 视频流 / 路口预测三件会议任务仍属后续。
+- **P5** 真实 SignalVision adapter：**感知接入已落地**（`adapters/signalvision/`，见 [adapters.md](adapters.md)）；命令控制闭环（信号控制）已在 P6 落地。
+- **P7** 视频文本事件问答（`video` 域，原生迁入视频组「事件文本问答」能力）：视频感知体发文本事件 → 集中文本库 → 检索 → LLM(GLM) 问答 + 前端面板，见 [video.md](video.md)。原始视频不进 Kafka；视频流播放 / 路口预测仍属后续。
 
 ## 8. 从老仓库借鉴 vs 丢弃
 
