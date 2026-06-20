@@ -57,9 +57,11 @@ class CongestionLevel(str, Enum):
 
 
 class CommandType(str, Enum):
-    """下行命令类型白名单（docs/protocol.md §5）。本期仅信号配时。"""
+    """下行命令类型白名单（docs/protocol.md §5）。"""
 
     SET_SIGNAL_PLAN = "set_signal_plan"
+    #: P8 视频域：请求 vision hub 对某摄像头/路段做一次视频推理、回传文本结果（docs/video.md §10）。
+    REQUEST_VIDEO_TEXT = "request_video_text"
 
 
 class AckStatus(str, Enum):

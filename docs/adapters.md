@@ -15,8 +15,14 @@ topic/agent id 见 [naming.md](naming.md)。
 - **不做**：在适配器里散搓 envelope（一律走 `observation_envelope` / `ack_envelope`）；计算
   World Status（排队/流量/延误/拥堵等共识指标一律由系统级智能体算，AGENTS.md §3.2）。
 
-每个外部源一个子包，互不耦合。当前落地：`signalvision/`——**感知侧**（§2）+ **执行侧**
-（§3 信号控制，P6），同子包、职责分离、共用 client。
+每个外部源一个子包，互不耦合。当前落地：
+
+- `signalvision/`——**感知侧**（§2）+ **执行侧**（§3 信号控制，P6），同子包、职责分离、共用 client。
+- `visionhub/`——**vision hub 双向桥**（§5，P8）：命令桥（ANP 视频命令→vision hub info）+ 结果桥
+  （vision hub 文本结果→ANP 视频感知层），ANP↔vision hub 双向 Kafka 的翻译边界。
+
+> 适配器的「方向」不止感知/执行：`visionhub/` 是**域级双向桥**——既把 ANP 下行命令译给外部源，
+> 又把外部源的文本结果译回 ANP 感知层。本质仍是「只在 adapter 内懂外部原生结构」这一原则。
 
 ## 2. SignalVision 感知适配器
 
@@ -181,5 +187,96 @@ cd backend && pytest tests/test_signalvision_exec.py -q
 ## 4. 后续（不在本期）
 
 - 完整多相位配时调度（周期/绿信比/相位序列）；真实 SV/SUMO 闭环实测。
-- 视频流迁移、路口预测（会议另两件任务，AGENTS.md §1.4，另开任务）。
+- 路口预测（会议另一件任务，AGENTS.md §1.4，另开任务）。
 - 其余外部源适配器按本文骨架另起子包。
+
+## 5. vision hub 双向桥（ANP↔vision hub，P8）
+
+P7 让视频感知体把文本事件**上行**发到 ANP（`anp.video.perception.text.v1`）。P8 补**下行命令**，
+让 ANP 主动「请求 vision hub 做一次视频推理」，结果文本回流入库——闭合对称双向环。**只走 Kafka、
+只传文本、永不传视频**。设计与 step 划分见 [phases/P8.md](../phases/P8.md)，视频域全景见 [video.md](video.md) §10。
+
+### 5.1 集成形态：ANP 原生契约 + 翻译边界
+
+ANP 内部与命令发起方一律说 **ANP 原生契约**；`adapters/visionhub/` 是**唯一**懂 vision hub 原生
+topic/envelope 的地方（镜像 SignalVision adapter）。这样最大化复用 vision hub 已有 Kafka 接口，
+**它那边改动最小**（备选「让 vision hub 直接说 ANP 契约」已否决）。
+
+```
+ANP 侧（说 ANP 契约）        adapters/visionhub（翻译边界）          vision hub（原生 Kafka）
+run_video_command.py
+ └─► anp.video.command.v1 ──► [命令桥] ──译──► visionhub.world_model.info.v1
+        (request_video_text)                          └─► （step1 替身 / step2 真身）推理产文本
+                                                                       │ observation.traffic.video_text
+ P7 ingest ◄─ anp.video.perception.text.v1 ◄─ [结果桥] ◄─译─ edge.observation.result.v1 ◄┘
+```
+
+### 5.2 vision hub 现有 Kafka 接口（勘察）
+
+| vision hub topic（默认） | 方向 | 用途 |
+|---|---|---|
+| `visionhub.world_model.info.v1` | 收 | 收世界模型 info（我们注入 `info_type=video_inference_request`）→ step2 补「收→dispatch」胶水 |
+| `edge.observation.result.v1` | 发 | 其 canonical adapter 已把 agent run → `observation.traffic.video_text` envelope |
+
+vision hub envelope 约定形如 `{schema_version, message_id, event_type, source, time, scope, payload,
+trace{trace_id, correlation_id}}`（aiokafka）。adapter 的 mapping 对其字段**防御性读取**（多备选字段名
++ 缺省兜底）；step2 接真实 repo 时按其当前模块复核字段。
+
+### 5.3 命令语义与映射
+
+复用通用 `CommandPayload`（**仅 `CommandType` 加 `request_video_text` 枚举值**），params 形态：
+
+| 契约 params | vision hub info payload | 说明 |
+|---|---|---|
+| `camera_id` | `camera_id` | 目标摄像头 |
+| `road_name`/`intersection_id`/`road_segment` | 同名 | 路段/路口标识 |
+| `time_window{time_from,time_to}` | `time_window` | 推理时间窗（可选） |
+| `prompt` | `prompt` | 给视频模型的提问 |
+| `clip_ref` | `clip_ref` | 视频片段指针（只传指针不传视频） |
+| `command_id`（envelope payload） | `payload.command_id` + `trace.correlation_id` | **关联键** |
+
+结果方向：vision hub `observation.traffic.video_text` 的 payload → ANP `VideoTextEventPayload`，经
+`video_text_envelope` 以**感知体身份 `video-perception-visionhub-001`** 重新发布（不冒用 vision hub
+内部 agent_id，镜像 SV adapter）；`trace.correlation_id`（= 原 `command_id`）落到 ANP envelope 的
+`trace.parent_trace_id`。**P7 ingest/库/QA 零改**入库问答。
+
+- **关联（回执）**：不新增强制 ack topic；用 `command_id`/`correlation_id` 把命令与回流文本关联，
+  `CommandTracker` 记「已发→收到结果」（专用 ack 留作后续可选）。
+- **Safety**：视频推理请求**非控制动作**，不走信号配时 Safety Guard；vision hub 侧本地有自己的限流/
+  安全闭环（step2）。
+
+### 5.4 身份与模块（`backend/anp/adapters/visionhub/`）
+
+| 文件 | 职责 |
+|---|---|
+| `config.py` | `VisionHubBridgeConfig`：三身份、vision hub topic 名/`info_type`、bootstrap |
+| `mapping.py` | 纯映射：ANP 命令→info 消息、vision hub 结果→ANP `VideoTextEventPayload`（防御性、可单测） |
+| `command_bridge.py` | `VisionHubCommandBridge`：消费 `anp.video.command.v1`→译→发 vision hub info；记账 |
+| `result_bridge.py` | `VisionHubResultBridge`：消费 `edge.observation.result.v1`→译→发 ANP 感知层文本；记账 |
+| `tracker.py` | `CommandTracker`：`command_id` 对账表「已发→收到结果」 |
+| `admin.py` | `ensure_visionhub_topics`：**仅 step1 本地**幂等创建 vision hub 外部 topic（broker 关了 auto-create） |
+
+身份（[naming.md](naming.md) §4）：出口桥 `video-visionhub-bridge-001`、回流感知体 `video-perception-visionhub-001`、
+远端推理体 `video-visionhub-001`。命令源用视频任务体 `video-task-001`（CLI 发起，不经网关/registry，step1 最简）。
+
+### 5.5 运行与验证
+
+```bash
+# 端到端命令闭环冒烟（step1：命令→桥→替身桩推理→桥→入库→问答；真实 Kafka，本机两程序）
+python backend/scripts/smoke_video_command_loop.py
+# live 多进程：双向桥 + 替身 + ingest，再 CLI 发命令（详见 video.md §10.4）
+python backend/scripts/run_visionhub_bridge.py
+python backend/scripts/stub_visionhub_agent.py
+python backend/scripts/run_video_ingest.py
+python backend/scripts/run_video_command.py --road-name 民族大道 --prompt "最近有没有事故？"
+# 单测（命令/结果纯映射 + 桥 handle + 对账 + 入库往返，无 Kafka）
+cd backend && pytest tests/test_visionhub_bridge.py -q
+```
+
+**已验证（step1）**：单测全绿（`test_visionhub_bridge.py` 12 项）；端到端冒烟 PASS（命令桥转发
+`request_video_text`/跳过非视频命令、替身桩推理、结果桥译回入库、`CommandTracker` 经 `correlation_id`
+关联「已发→收到结果」、问答查到新结果且 event_id 在 tracker/库/证据三处一致）；live 多进程
+（CLI→双向桥→替身→ingest→问答）打通，回流事件 `source=video-perception-visionhub-001`、
+`parent_trace_id=command_id`。
+**未验证风险（step2）**：替身 + 桩推理，未对接真实 VLM/dispatcher；跨机 Kafka advertised.listeners/网络；
+vision hub 真实 envelope 字段需复核。详见 [phases/P8.md](../phases/P8.md)。

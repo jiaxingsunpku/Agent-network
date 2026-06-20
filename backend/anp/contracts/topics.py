@@ -74,18 +74,23 @@ ALL_TRAFFIC_TOPICS: tuple[str, ...] = (
 
 
 class VideoTopics:
-    """视频域 v1 topic 清单（P7，docs/naming.md §2「视频域 v1 Topic 清单」）。
+    """视频域 v1 topic 清单（docs/naming.md §2「视频域 v1 Topic 清单」）。
 
-    语义：视频智能体作为感知体，把视频大模型处理后的「文本事件」发到感知层 topic；
-    原始视频不进 Kafka。状态层/控制层本阶段不做（无共识聚合、无下行命令）。
+    P7：视频智能体作为感知体，把视频大模型处理后的「文本事件」发到感知层 topic
+    （``PERCEPTION_TEXT``）；原始视频不进 Kafka。
+    P8：补控制层 ``COMMAND``——ANP 下发「请求视频推理」命令，经 adapters/visionhub
+    译给 vision hub，结果文本回流仍走 ``PERCEPTION_TEXT``（闭合对称双向环，docs/video.md §10）。
     """
 
     PERCEPTION_TEXT = build_topic(Domain.VIDEO, Layer.PERCEPTION, "text")
+    #: P8：下行「请求视频推理」命令（anp.video.command.v1）。
+    COMMAND = build_topic(Domain.VIDEO, Layer.COMMAND)
     DLQ = build_topic(Domain.VIDEO, Layer.DLQ)  # 预留
 
 
-#: P7 一阶段需要建立的视频域 topic。
+#: 视频域需要建立的 topic（P7 感知文本 + P8 命令 + DLQ 预留）。
 ALL_VIDEO_TOPICS: tuple[str, ...] = (
     VideoTopics.PERCEPTION_TEXT,
+    VideoTopics.COMMAND,
     VideoTopics.DLQ,
 )
