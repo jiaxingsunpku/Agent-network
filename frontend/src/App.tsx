@@ -25,6 +25,7 @@ export default function App() {
   const [activeWorldModelId, setActiveWorldModelId] = useState(initialWorldModelId);
   const [activeToolId, setActiveToolId] = useState("");
   const activeWorldModel = worldModels.find((model) => model.id === activeWorldModelId) ?? worldModels[0];
+  const showVideoQA = activeWorldModel?.id === "wm-video-stream";
   const activeTools = useMemo(() => (activeWorldModel ? getToolsForModel(activeWorldModel) : []), [activeWorldModel]);
 
   useEffect(() => {
@@ -33,7 +34,7 @@ export default function App() {
 
   // 网关模式：选中节点 + Inspector 收起态。
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() => window.matchMedia("(max-width: 1180px)").matches);
 
   // 节点排序：执行体/智能体优先，再路口，网关服务节点末尾。
   const gatewayNodes = useMemo(() => {
@@ -48,6 +49,14 @@ export default function App() {
     const target = snapshot.nodes.find((n) => n.nodeType === "agent" && nodeHasCommands(n)) ?? snapshot.nodes[0];
     setSelectedId(target?.id ?? null);
   }, [gatewayMode, snapshot.nodes, selectedId]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 1180px)");
+    const sync = () => setInspectorCollapsed(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
 
   if (gatewayMode) {
     const selected: SelectionRef | null = selectedId ? { kind: "node", id: selectedId } : null;
@@ -88,7 +97,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <VideoQAPanel />
+          {showVideoQA && <VideoQAPanel />}
           <div className="stage-wrap gateway-stage">
             {activeWorldModel && (
               <ToolWorkspace
