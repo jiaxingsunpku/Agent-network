@@ -280,3 +280,24 @@ cd backend && pytest tests/test_visionhub_bridge.py -q
 `parent_trace_id=command_id`。
 **未验证风险（step2）**：替身 + 桩推理，未对接真实 VLM/dispatcher；跨机 Kafka advertised.listeners/网络；
 vision hub 真实 envelope 字段需复核。详见 [phases/P8.md](../phases/P8.md)。
+
+
+### 5.6 step2 跨机落地（✅ 2026-06-20 已跨机活体验证）
+
+接真实 wangxuan repo（`/nvme2/VLM/agents_for_vision_hub`）后定案，**不改 §5.1「ANP 原生契约 + 翻译边界」**，
+仅 vision hub 侧补「收命令→dispatch→产结果」胶水，且选最不侵入的形态：
+
+- **宿主机旁路 sidecar**（`scripts/run_video_inference_glue.py`，源码留底于 ANP 仓库
+  `backend/scripts/run_video_inference_glue.py`）：独立进程消费 `visionhub.world_model.info.v1`，调
+  vision hub 已暴露的 `POST /api/v1/world-model/demo-dispatch` 做**真实多智能体推理**，轮询 `final_answer`，
+  直接产 `edge.observation.result.v1`（`trace.correlation_id=command_id`、payload 带 camera/road）。
+  **vision hub 容器零改、零重启**；删脚本即复原（wangxuan 非 git，备份在 `.anp_p8_backup/`）。
+- **为何绕开其 `canonical_observation_adapter`**：它从 agent-run outbox 产结果，`trace.correlation_id=run_id`
+  （与命令无关）、camera/intersection 兜底 `unknown` → 命令↔结果关联键与路段元数据会丢。sidecar 直接产，
+  字段来自命令，关联键正确。
+- **跨机 Kafka = 反向 SSH 隧道 + 单 broker**：仅 ANP 侧（sjx）跑 broker；`ssh -N -R 9092:127.0.0.1:9092 wangxuan`
+  把 wangxuan 的 `localhost:9092` 透到 sjx broker（advertised=localhost 经隧道天然自洽）。
+- **活体验证 PASS**：`request_video_text`(人民路) → sidecar 真实推理 succeeded → 回流入库
+  `source=video-perception-visionhub-001`、`parent_trace_id==command_id`、问答命中；视频组容器未受影响。
+
+§5.5 列的「未验证风险（step2）」至此**已消解**（替身→真身、桩→真实推理、跨机 Kafka 已通、envelope 字段已复核）。

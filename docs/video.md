@@ -161,3 +161,13 @@ python backend/scripts/run_video_command.py --camera-id cam-minzu-east-001 --roa
 
 - step1 用替身 + 桩推理，未验证真实 VLM/真实 dispatcher 路径；问答自动触发推理的同步闭环留后续。
 - step2 跨机（wangxuan `/nvme2/VLM/agents_for_vision_hub`）主风险是**跨机 Kafka**（ANP broker advertised 仅 localhost，需配双 listener/开端口/隧道）+ vision hub 侧补「收命令→dispatch→产结果」胶水 + 真实字段复核。详见 [phases/P8.md](../phases/P8.md)。
+
+
+### 10.6 step2 跨机落地（✅ 2026-06-20 已跨机活体验证）
+
+vision hub 真身在 wangxuan（docker 容器，`network_mode:host`，PG/Milvus/Redis 在跑）。step2 以**宿主机旁路
+sidecar**（`scripts/run_video_inference_glue.py`）打通：消费 `visionhub.world_model.info.v1` → 调其
+`POST /api/v1/world-model/demo-dispatch` 做**真实多智能体推理**（qwen-plus）→ 轮询 `final_answer` → 直接产
+`edge.observation.result.v1`（`correlation_id=command_id`）→ ANP 结果桥译回入库问答。**vision hub 容器零改
+零重启**；跨机 Kafka 走**反向 SSH 隧道 + 单 broker**。活体 PASS：命令(人民路)→真实推理→回流入库→问答命中，
+关联键三处一致，视频组容器未受影响。详见 [phases/P8.md](../phases/P8.md) §step2 与 [adapters.md](adapters.md) §5.6。
