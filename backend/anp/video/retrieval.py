@@ -43,7 +43,11 @@ class SearchFilters:
     camera_id: str | None = None
     category: str | None = None
     keywords: list[str] = field(default_factory=list)
+    #: 命令归因：只召回 parent_trace_id ∈ 此集合的回流文本（= 命令 command_id；P9 任务聚合）。
+    parent_trace_ids: list[str] | None = None
     limit: int = 20
+    #: 分页偏移（数据库浏览用，task2）；默认 0，向后兼容现有 search 调用。
+    offset: int = 0
 
 
 def extract_keywords(question: str) -> list[str]:

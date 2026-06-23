@@ -14,6 +14,8 @@ from pathlib import Path
 #: 仓库根（backend/anp/video/config.py → parents[3] = repo root）。
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = REPO_ROOT / "backend" / ".data" / "video_text.db"
+#: 协作视频任务存储（P9）；与文本库同目录、独立文件。
+DEFAULT_TASK_DB_PATH = REPO_ROOT / "backend" / ".data" / "video_tasks.db"
 DOTENV_PATH = REPO_ROOT / "backend" / ".env"
 
 #: 视频域智能体身份（docs/naming.md §4）。
@@ -85,6 +87,7 @@ class VideoConfig:
     """视频域运行配置。"""
 
     db_path: Path = DEFAULT_DB_PATH
+    task_db_path: Path = DEFAULT_TASK_DB_PATH
     perception_agent_id: str = VIDEO_PERCEPTION_AGENT_ID
     task_agent_id: str = VIDEO_TASK_AGENT_ID
     default_query_limit: int = 20

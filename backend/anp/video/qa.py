@@ -101,11 +101,43 @@ class VideoQAService:
         *,
         base_filters: SearchFilters | None = None,
         limit: int | None = None,
+        extract: bool = True,
+        use_llm: bool | None = None,
     ) -> dict[str, Any]:
-        filters = extract_filters(question, base_filters or SearchFilters())
+        """检索 + 合成回答。
+
+        ``extract=True``（默认，前端问答）：在 ``base_filters`` 上叠加从问题启发式抽取的
+        路段/关键词。``extract=False``（P9 任务聚合）：直接用 ``base_filters``（已含精确
+        ``parent_trace_ids`` 命令归因），**不跑启发式路名抽取**，避免对「仅按摄像头」的任务
+        因 prompt 里出现路名而误过滤掉归因命中的回流事件。
+
+        ``use_llm=False`` 用于协作任务的本地快路径：只基于已入库文本事件生成规则摘要，不出网。
+        """
+
+        if extract:
+            filters = extract_filters(question, base_filters or SearchFilters())
+        else:
+            filters = base_filters or SearchFilters()
         if limit is not None:
             filters.limit = limit
         hits = self.store.search(filters)
+        return self.answer_from_records(question, hits, filters=filters, use_llm=use_llm)
+
+    def answer_from_records(
+        self,
+        question: str,
+        records: list[dict[str, Any]],
+        *,
+        filters: SearchFilters,
+        use_llm: bool | None = None,
+    ) -> dict[str, Any]:
+        """对已召回的本地事件做答案合成。
+
+        编排器批量刷新任务时已经按 ``parent_trace_id`` 找到了回流事件；复用这些本地记录可避免
+        详情接口再次扫库或阻塞在外部 LLM 上。
+        """
+
+        hits = records
         evidence = [_evidence_item(h) for h in hits]
         tool_calls = [
             {
@@ -125,7 +157,8 @@ class VideoQAService:
                 "warnings": warnings,
             }
 
-        if self.llm_config.enabled:
+        llm_allowed = self.llm_config.enabled if use_llm is None else bool(use_llm and self.llm_config.enabled)
+        if llm_allowed:
             try:
                 answer = self._llm_answer(question, hits)
             except LLMError as exc:
@@ -133,7 +166,7 @@ class VideoQAService:
                 warnings.append(f"LLM 调用失败，已回退规则摘要：{exc}")
         else:
             answer = rule_summary(question, hits)
-            warnings.append("LLM 未启用，回答为规则摘要")
+            warnings.append("LLM 未调用，回答为本地规则摘要" if use_llm is False else "LLM 未启用，回答为规则摘要")
 
         return {
             "answer": answer,

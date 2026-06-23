@@ -25,11 +25,19 @@ export function useSimulatedSnapshot() {
 
   useEffect(() => {
     let cancelled = false;
+    // 网关未实现 /world-model/runtime（见 README 边界）：首个请求 404 后不再重复打网络，
+    // 改为每秒本地推演 makeFallbackRuntime，保持时钟/指标动效又消除每秒 404 噪声。
+    let endpointAvailable = true;
     const load = async () => {
+      if (!endpointAvailable) {
+        if (!cancelled) setRuntime(makeFallbackRuntime());
+        return;
+      }
       try {
         const next = await fetchRuntimeSnapshot();
         if (!cancelled) setRuntime(next);
       } catch {
+        endpointAvailable = false;
         if (!cancelled) setRuntime(makeFallbackRuntime());
       }
     };

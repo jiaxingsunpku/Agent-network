@@ -95,7 +95,25 @@ def main() -> int:
         registry=seed_default_registry(),
         producer=producer,
     )
-    client = TestClient(create_app(state))
+    app = create_app(state)
+    # P9：把视频任务路由挂上同一 app（临时库 + 复用 FakeProducer），做任务契约冒烟。
+    import tempfile
+
+    from anp.video.config import LLMConfig, VideoConfig
+    from anp.video.orchestrator import VideoTaskOrchestrator
+    from anp.video.qa import VideoQAService
+    from anp.video.routes import create_video_router
+    from anp.video.store import SqliteVideoTextStore
+    from anp.video.tasks import SqliteVideoTaskStore
+
+    _tmp = Path(tempfile.mkdtemp(prefix="smoke-gw-video-"))
+    _vstore = SqliteVideoTextStore(_tmp / "v.db")
+    _vqa = VideoQAService(_vstore, llm_config=LLMConfig(base_url=None, model="x", api_key=None, proxy=None))
+    _vorch = VideoTaskOrchestrator(
+        task_store=SqliteVideoTaskStore(_tmp / "t.db"), text_store=_vstore, qa=_vqa, producer=producer
+    )
+    app.include_router(create_video_router(_vstore, _vqa, _vorch, config=VideoConfig(db_path=_tmp / "v.db")))
+    client = TestClient(app)
 
     # 1) snapshot。
     r = client.get("/api/agent-network/snapshot")
@@ -172,7 +190,42 @@ def main() -> int:
     r = client.post("/api/agent-network/edge-inference", json={"agent_id": "traffic-virtual-001"})
     _check(r.json().get("error", {}).get("code") == "unsupported", "edge-inference 结构化 unsupported")
 
-    print("[smoke-gateway] PASS: 网关五接口契约与命令校验分支全部通过。")
+    # 6) 协作视频任务（P9）：创建扇出定向命令 + 列表 + 回流后详情聚合 + 占位模块 400。
+    r = client.post(
+        "/api/agent-network/video-text/tasks",
+        json={"prompt": "民族大道有没有事故？", "scope": {"road_name": "民族大道", "camera_id": "cam-1"}},
+    )
+    tb = r.json()
+    _check(r.status_code == 200 and tb["status"] == "running" and len(tb["commands"]) == 1, "视频任务创建扇出 1 条定向命令")
+    tid, cid = tb["task_id"], tb["commands"][0]["command_id"]
+    _check(any(s[0] == "anp.video.command.v1" for s in producer.sent), "视频命令落到 anp.video.command.v1（≠ 交通命令 topic）")
+    _check(tb["commands"][0].get("target_agent_id") and "broadcast" not in str(tb), "命令带 target_agent_id、无 broadcast")
+    r = client.get("/api/agent-network/video-text/tasks")
+    _check(any(t["task_id"] == tid for t in r.json()), "任务列表含新建任务")
+    r = client.post(
+        "/api/agent-network/video-text/tasks",
+        json={"prompt": "检测一下", "module": "video.detect", "scope": {}},
+    )
+    _check(r.status_code == 400, "占位命令模块 video.detect → 400（vision hub 职责，无执行端）")
+    # 回流入库（parent_trace_id == command_id）后取详情 → 归因 + 聚合。
+    from anp.contracts import Trace, VideoTextEventPayload, new_trace_id, video_text_envelope
+
+    _vstore.append(
+        video_text_envelope(
+            agent_id="video-perception-visionhub-001",
+            payload=VideoTextEventPayload(camera_id="cam-1", road_name="民族大道", text="两车追尾，右车道受阻。", category="事故"),
+            trace=Trace(trace_id=new_trace_id(), parent_trace_id=cid),
+        )
+    )
+    r = client.get(f"/api/agent-network/video-text/tasks/{tid}")
+    db = r.json()
+    _check(r.status_code == 200 and db["status"] == "aggregated" and db["commands"][0]["status"] == "returned", "回流后任务详情按 command_id 归因聚合")
+    _check(client.get("/api/agent-network/video-text/tasks/nope").status_code == 404, "未知任务 → 404")
+    r = client.get("/api/agent-network/video-text/command-modules")
+    mods = {m["key"]: m for m in r.json()}
+    _check(mods["request_video_text"]["implemented"] and not mods["video.detect"]["implemented"], "命令模块枚举：request_video_text 落地 / 其余占位")
+
+    print("[smoke-gateway] PASS: 网关五接口 + 视频任务契约 + 命令校验分支全部通过。")
     return 0
 
 

@@ -86,7 +86,7 @@ v1 虚拟交通智能体同时承担感知与执行，统一登记为 `traffic-v
 
 SignalVision 感知接入适配器（P5，见 [adapters.md](adapters.md)）作为纯感知源登记为 `traffic-perception-sv-001`，能力 `perception`，`command_types` 为空。
 
-SignalVision 信号控制执行体（P6，见 [adapters.md](adapters.md) §3）登记为 `traffic-exec-sv-001`，能力 `exec`，`command_types=[set_signal_plan]`。
+SignalVision 信号控制执行体（P6/B-6/B-10，见 [adapters.md](adapters.md) §3）登记为 `traffic-exec-sv-001`，能力 `exec`，`command_types=[set_signal_plan, control_signal_inference, set_signal_map]`（细粒度相位、写展示层不驱动 SUMO §3.4；粗粒度启停/选算法、真驱动 SUMO §3.5；全局换图 §3.6）。
 
 视频域（P7，见 [video.md](video.md)）：视频感知体 `video-perception-001`（role=perception，发文本事件）；视频问答任务体 `video-task-001`（role=task，检索+合成）。
 

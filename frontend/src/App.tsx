@@ -4,7 +4,7 @@ import { ModelIntroPanel } from "./components/ModelIntroPanel";
 import { InspectorPanel } from "./components/InspectorPanel";
 import { getToolsForModel, ToolWorkspace } from "./components/ToolWorkspace";
 import { TopBar } from "./components/TopBar";
-import { VideoQAPanel } from "./components/VideoQAPanel";
+import { VideoWorldModelView } from "./components/VideoWorldModelView";
 import { worldModels } from "./data/worldModels";
 import { useSimulatedSnapshot } from "./hooks/useSimulatedSnapshot";
 import { AgentNode, SelectionRef } from "./types";
@@ -14,6 +14,31 @@ function nodeHasCommands(node: AgentNode): boolean {
   const metrics = node.metrics as Record<string, unknown>;
   const raw = metrics.commandTypes ?? metrics.command_types;
   return Array.isArray(raw) && raw.length > 0;
+}
+
+function MobileWorldModelSwitcher({
+  activeWorldModelId,
+  onSelectWorldModel
+}: {
+  activeWorldModelId: string;
+  onSelectWorldModel: (id: string) => void;
+}) {
+  return (
+    <div className="mobile-world-switcher" role="tablist" aria-label="世界模型快捷切换">
+      {worldModels.map((model) => (
+        <button
+          key={model.id}
+          type="button"
+          role="tab"
+          aria-selected={activeWorldModelId === model.id}
+          className={activeWorldModelId === model.id ? "active" : ""}
+          onClick={() => onSelectWorldModel(model.id)}
+        >
+          {model.name}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export default function App() {
@@ -26,6 +51,7 @@ export default function App() {
   const [activeToolId, setActiveToolId] = useState("");
   const activeWorldModel = worldModels.find((model) => model.id === activeWorldModelId) ?? worldModels[0];
   const showVideoQA = activeWorldModel?.id === "wm-video-stream";
+  const showGatewayInspector = activeWorldModel?.id !== "wm-video-stream";
   const activeTools = useMemo(() => (activeWorldModel ? getToolsForModel(activeWorldModel) : []), [activeWorldModel]);
 
   useEffect(() => {
@@ -58,10 +84,17 @@ export default function App() {
     return () => query.removeEventListener("change", sync);
   }, []);
 
+  // selected 引用必须稳定：App 每秒重渲（runtime 本地推演），若每帧新建对象字面量，
+  // InspectorPanel 的 projection 副作用（依赖 [selected]）会每秒重跑、先 setProjection(null)
+  // 再重拉，导致右栏在 ProjectionPanel ⇄ NodePanel 间每秒闪烁。memo 到 selectedId 即可。
+  const selected = useMemo<SelectionRef | null>(
+    () => (selectedId ? { kind: "node", id: selectedId } : null),
+    [selectedId]
+  );
+
   if (gatewayMode) {
-    const selected: SelectionRef | null = selectedId ? { kind: "node", id: selectedId } : null;
     return (
-      <main className="app-shell gateway-shell">
+      <main className={`app-shell gateway-shell${showGatewayInspector ? "" : " no-inspector"}`}>
         <LeftToolbar
           worldModels={worldModels}
           activeWorldModelId={activeWorldModel?.id ?? activeWorldModelId}
@@ -69,6 +102,10 @@ export default function App() {
         />
         <section className="workspace gateway-workspace">
           <TopBar activeWorldModel={activeWorldModel} runtime={runtime} />
+          <MobileWorldModelSwitcher
+            activeWorldModelId={activeWorldModel?.id ?? activeWorldModelId}
+            onSelectWorldModel={setActiveWorldModelId}
+          />
           <div className="gateway-status-strip" aria-label="数据源状态">
             <span className="gateway-source-badge live">source gateway</span>
             <span>节点 {snapshot.nodes.length}</span>
@@ -78,46 +115,76 @@ export default function App() {
             <span>Kafka lag {snapshot.summary.kafkaLagMs} ms</span>
             <span>{new Date(snapshot.generatedAt).toLocaleTimeString()}</span>
           </div>
-          <div className="gateway-node-picker" role="tablist" aria-label="网关节点">
-            {gatewayNodes.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                role="tab"
-                aria-selected={selectedId === node.id}
-                className={`gateway-node-btn type-${node.nodeType}${selectedId === node.id ? " active" : ""}`}
-                onClick={() => {
-                  setSelectedId(node.id);
-                  setInspectorCollapsed(false);
-                }}
-                title={node.id}
-              >
-                <i className={`node-dot ${node.status}`} />
-                <span>{node.label}</span>
-              </button>
-            ))}
-          </div>
-          {showVideoQA && <VideoQAPanel />}
-          <div className="stage-wrap gateway-stage">
-            {activeWorldModel && (
-              <ToolWorkspace
-                model={activeWorldModel}
-                snapshot={snapshot}
-                tools={activeTools}
-                activeToolId={activeToolId}
-                runtime={runtime}
-              />
+          {showGatewayInspector && (
+            <div className="gateway-node-picker" role="tablist" aria-label="网关节点">
+              {gatewayNodes.map((node) => (
+                <button
+                  key={node.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selectedId === node.id}
+                  className={`gateway-node-btn type-${node.nodeType}${selectedId === node.id ? " active" : ""}`}
+                  onClick={() => {
+                    setSelectedId(node.id);
+                    setInspectorCollapsed(false);
+                  }}
+                  title={node.id}
+                >
+                  <i className={`node-dot ${node.status}`} />
+                  <span>{node.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* 视频世界模型：去 mock 化，问答升监控主界面 + 协作任务侧栏（P9）；
+              其余模型保留功能模块工具条 + ToolWorkspace。 */}
+          {!showVideoQA && (
+            <div className="gateway-tool-tabs" role="tablist" aria-label="功能模块">
+              {activeTools.map((tool) => {
+                const Icon = tool.icon;
+                return (
+                <button
+                  key={tool.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeToolId === tool.id}
+                  className={activeToolId === tool.id ? "gateway-tool-tab active" : "gateway-tool-tab"}
+                  onClick={() => setActiveToolId(tool.id)}
+                  title={tool.description}
+                >
+                  <Icon size={16} />
+                  <span>{tool.title}</span>
+                </button>
+                );
+              })}
+            </div>
+          )}
+          <div className={`stage-wrap gateway-stage${showVideoQA ? " video-stage" : ""}`}>
+            {showVideoQA ? (
+              <VideoWorldModelView />
+            ) : (
+              activeWorldModel && (
+                <ToolWorkspace
+                  model={activeWorldModel}
+                  snapshot={snapshot}
+                  tools={activeTools}
+                  activeToolId={activeToolId}
+                  runtime={runtime}
+                />
+              )
             )}
           </div>
         </section>
-        <InspectorPanel
-          snapshot={snapshot}
-          selected={selected}
-          source={source}
-          worldModels={worldModels}
-          collapsed={inspectorCollapsed}
-          onCollapse={() => setInspectorCollapsed((value) => !value)}
-        />
+        {showGatewayInspector && (
+          <InspectorPanel
+            snapshot={snapshot}
+            selected={selected}
+            source={source}
+            worldModels={worldModels}
+            collapsed={inspectorCollapsed}
+            onCollapse={() => setInspectorCollapsed((value) => !value)}
+          />
+        )}
       </main>
     );
   }
@@ -132,6 +199,10 @@ export default function App() {
       />
       <section className="workspace simplified-workspace">
         <TopBar activeWorldModel={activeWorldModel} runtime={runtime} />
+        <MobileWorldModelSwitcher
+          activeWorldModelId={activeWorldModel?.id ?? activeWorldModelId}
+          onSelectWorldModel={setActiveWorldModelId}
+        />
         <div className="stage-wrap simplified-stage-wrap">
           {activeWorldModel && <ToolWorkspace model={activeWorldModel} snapshot={snapshot} tools={activeTools} activeToolId={activeToolId} runtime={runtime} />}
         </div>

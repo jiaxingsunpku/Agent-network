@@ -70,6 +70,7 @@ OK_PARAMS = {"desired_phase": "north_south_green", "duration_s": 25}
 # --------------------------------------------------------------------------- #
 class _StubSV(BaseHTTPRequestHandler):
     received: list[tuple[str | None, dict | None]] = []
+    sim_received: list[tuple[str, str | None]] = []  # (action, config)
 
     def log_message(self, *args):
         pass
@@ -92,6 +93,15 @@ class _StubSV(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length).decode("utf-8") if length else ""
         data = json.loads(raw) if raw else {}
+        # 仿真启停（control_signal_inference）。
+        if self.path == "/api/simulation/start":
+            _StubSV.sim_received.append(("start", data.get("config")))
+            self._send({"success": True, "message": "仿真启动成功（集成模式）", "pid": 4321})
+            return
+        if self.path == "/api/simulation/stop":
+            _StubSV.sim_received.append(("stop", None))
+            self._send({"success": True, "message": "仿真已停止"})
+            return
         parts = self.path.strip("/").split("/")  # api / junctions / <id> / update
         junction_id = parts[2] if len(parts) >= 4 and parts[3] == "update" else None
         if junction_id is None:
@@ -126,11 +136,19 @@ def _gateway_source() -> Source:
     return Source(system=SourceSystem.PLATFORM, agent_id=GATEWAY_AGENT_ID)
 
 
-def _manual_command(command_id: str, *, target: str, params: dict, object_id: str | None = INTERSECTION, expires_sec: float = 30.0) -> Envelope:
+def _manual_command(
+    command_id: str,
+    *,
+    target: str,
+    params: dict,
+    object_id: str | None = INTERSECTION,
+    expires_sec: float = 30.0,
+    command_type: CommandType = CommandType.SET_SIGNAL_PLAN,
+) -> Envelope:
     return command_envelope(
         source=_gateway_source(),
         target_agent_id=target,
-        payload=CommandPayload(command_id=command_id, command_type=CommandType.SET_SIGNAL_PLAN, params=params),
+        payload=CommandPayload(command_id=command_id, command_type=command_type, params=params),
         expires_at=expires_at_iso(expires_sec),
         object_id=object_id,
     )
@@ -184,8 +202,25 @@ def main() -> int:
             producer, "anp.traffic.command.v1",
             _manual_command("svx-other-001", target="some-other-agent", params=OK_PARAMS),
         )
+        # 8..9) control_signal_inference（粗粒度、真驱动 SUMO）：合法 start + 越界 action。
+        publish(
+            producer, "anp.traffic.command.v1",
+            _manual_command(
+                "svx-infer-001", target=SV_EXEC_AGENT_ID,
+                params={"action": "start", "algorithm": "maxpressure"},
+                command_type=CommandType.CONTROL_SIGNAL_INFERENCE,
+            ),
+        )
+        publish(
+            producer, "anp.traffic.command.v1",
+            _manual_command(
+                "svx-infer-bad-001", target=SV_EXEC_AGENT_ID,
+                params={"action": "pause"},
+                command_type=CommandType.CONTROL_SIGNAL_INFERENCE,
+            ),
+        )
         producer.flush()
-        print("[svexec-smoke] 已发布 7 条命令（网关路径 1 + 手工 6）")
+        print("[svexec-smoke] 已发布 9 条命令（网关路径 1 + 手工 6 + 控制推理 2）")
 
         # 执行体 drain：用真实 client 指向桩 SV。
         executor = SignalVisionExecutor(
@@ -229,11 +264,19 @@ def main() -> int:
         _expect("svx-route-001", "rejected", "（object_id 未映射 SV junction）")
         _expect("svx-expired-001", "expired")
         _expect(cid_valid, "duplicate", "（重复命令）")
+        _expect("svx-infer-001", "completed", "（control_signal_inference start maxpressure → 真驱动 SUMO）")
+        _expect("svx-infer-bad-001", "rejected", "（control_signal_inference 越界 action 被 Safety Guard 拒绝）")
 
         if "svx-other-001" in acks:
             failures.append("异目标命令不应产生 ack")
         else:
             print("[svexec-smoke]   ok: 异目标命令被忽略（无 ack）")
+
+        # 桩 SV 应收到 1 次 start(maxpressure)（控制推理合法命令），越界 action 不触达。
+        if _StubSV.sim_received == [("start", "maxpressure")]:
+            print(f"[svexec-smoke]   ok: 桩 SV 收到仿真控制 {_StubSV.sim_received}（control_signal_inference 真驱动路径）")
+        else:
+            failures.append(f"桩 SV 仿真控制调用不符，期望 [('start','maxpressure')]，实际 {_StubSV.sim_received}")
 
         # 桩 SV 应至少收到 2 次合法 update（网关路径 + cid_valid），均落在 SV_JUNCTION 且映射正确。
         sv_updates = [tl for jid, tl in _StubSV.received if jid == SV_JUNCTION]
@@ -260,7 +303,10 @@ def main() -> int:
                 print(f"[svexec-smoke] FAIL: {f}")
             return 1
 
-        print("[svexec-smoke] PASS: SV 命令执行闭环全分支（completed/rejected×2/expired/duplicate/ignored）+ SV 写端点映射一致。")
+        print(
+            "[svexec-smoke] PASS: SV 命令执行闭环全分支（set_signal_plan completed/rejected×2/expired/duplicate/ignored "
+            "+ control_signal_inference start completed/越界 rejected）+ SV 写端点 + 仿真控制端点映射一致。"
+        )
         return 0
     finally:
         server.shutdown()

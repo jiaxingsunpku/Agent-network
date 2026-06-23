@@ -26,40 +26,34 @@ export const worldModels: WorldModelDefinition[] = [
   {
     id: "wm-smart-signal",
     name: "智能信号灯世界模型",
-    subtitle: "最大路网 · 信号控制 · 训练评测",
+    subtitle: "最大路网 · 信号控制 · 实时态势",
     category: "交通控制",
     status: "running",
     templateName: "smart-signal-shell",
     instanceName: "最大 output 路网演示实例",
-    objective: "以最大 output 路网为主展示底图，提供交通控制、模型训练、对比评测和持续学习功能。",
-    description: "面向智能信号灯控制的世界模型，提供路网态势、策略训练、模型评测和持续学习闭环。",
+    objective: "以最大 output 路网为主展示底图，接入 SignalVision 做信号控制推理（启停/切换控制算法）与路口态势监控。",
+    description: "面向智能信号灯控制的世界模型：路网态势 + SignalVision 信号控制推理闭环。ANP 只下发粗粒度控制命令（开始/切换推理），不做模型训练（训练属 SignalTrain，独立系统）。",
     boundNodeIds: trafficFocusNodes,
     boundResourceTypes: ["detector", "database", "controller", "simulator", "storage"],
-    tags: ["traffic", "signal", "training", "control"],
+    tags: ["traffic", "signal", "inference", "control"],
     metrics: {
       信号路口: 207,
       道路边: 40050,
       车道: 48657,
       关注路口: 7
     },
-    outputs: ["交通地图", "信号控制建议", "训练任务", "模型评测报告"],
+    outputs: ["交通地图", "信号控制建议", "控制推理状态", "路口态势"],
     stages: [
       { id: "map", title: "路网展示", description: "最大 output 路网 Canvas 展示。", sourceSystem: "rebuild / SignalVision visualization", nodeIds: trafficFocusNodes },
-      { id: "train", title: "策略训练", description: "SignalTrain 模型训练面板。", sourceSystem: "SignalTrain training-tool" },
-      { id: "evaluate", title: "评测发布", description: "对比实验与报告入口。", sourceSystem: "SignalTrain comparison-tool" }
+      { id: "control", title: "信号控制推理", description: "SignalVision 启停/切换控制算法（maxpressure/colight…），真驱动仿真。", sourceSystem: "SignalVision /api/simulation" }
     ],
     actions: [
       { id: "signal-map", label: "交通地图", kind: "report", description: "显示最大交通路网。", sourceSystem: "rebuild visualization", buttonLabel: "地图", resultTitle: "最大交通路网", resultMetrics: { 信号路口: 207, 道路边: 40050, 车道: 48657 } },
-      { id: "signal-train", label: "模型训练", kind: "training", description: "打开训练任务配置。", sourceSystem: "SignalTrain training-tool", buttonLabel: "训练", resultTitle: "训练任务", resultMetrics: { 算法: "CoLight / PPO", episodes: 200 } }
+      { id: "signal-control", label: "信号控制推理", kind: "inference", description: "下发控制推理命令（开始/切换算法）。", sourceSystem: "SignalVision control inference", buttonLabel: "控制", resultTitle: "控制推理", resultMetrics: { 算法: "maxpressure / colight", 命令: "control_signal_inference" } }
     ],
     reference: {
-      copiedFrom: [
-        ...trafficSources,
-        "/home/sjx/project/SignalTrain/dashboard/static/html/training-tool.html",
-        "/home/sjx/project/SignalTrain/dashboard/static/html/comparison-tool.html",
-        "/home/sjx/project/SignalTrain/dashboard/static/html/continual-learning-tool.html"
-      ],
-      notes: "系统已完成路网、训练、评测和持续学习能力集成。"
+      copiedFrom: trafficSources,
+      notes: "ANP 接入 SignalVision（推理/控制）：信号控制推理 + 路口态势；模型训练（SignalTrain）不在本世界模型内。"
     }
   },
   {

@@ -85,6 +85,40 @@ def create_app(state: GatewayState | None = None) -> FastAPI:
         proj = mapping.build_projection(state, kind, id)
         return JSONResponse(content=proj.model_dump(mode="json"))
 
+    # -- 读：sv-network（真实 SV 路网几何，前端画真图）-------------------- #
+    # 务实例外：网关唯一一处直连外部源 HTTP（SV /api/network），只读几何、不入 Kafka 黑板；
+    # SV 原生结构的解析在 adapter（build_road_geometry），网关只搬运。同步 def → 线程池跑阻塞 IO。
+    @app.get(API_PREFIX + "/sv-network")
+    def get_sv_network(request: Request) -> JSONResponse:
+        denied = require_read(request)
+        if denied:
+            return denied
+        from anp.adapters.signalvision import SignalVisionClient
+        from anp.adapters.signalvision.network import build_road_geometry
+
+        client = SignalVisionClient(cfg.sv_base_url, timeout_sec=4.0)
+        net = client.get_network()
+        if not net.ok:
+            return _error(503, "sv_unreachable", f"SignalVision 路网不可达: {net.body.get('message', '')}")
+        summary = client.get_junctions_summary()
+        geo = build_road_geometry(net.body, summary.body if summary.ok else {})
+        return JSONResponse(content={"ok": True, "source": "signalvision", **geo})
+
+    # -- 读：sv-maps（SV 可用地图列表，前端切图下拉用）------------------- #
+    @app.get(API_PREFIX + "/sv-maps")
+    def get_sv_maps(request: Request) -> JSONResponse:
+        denied = require_read(request)
+        if denied:
+            return denied
+        from anp.adapters.signalvision import SignalVisionClient
+
+        client = SignalVisionClient(cfg.sv_base_url, timeout_sec=4.0)
+        resp = client.list_maps()
+        if not resp.ok:
+            return _error(503, "sv_unreachable", f"SignalVision 地图列表不可达: {resp.body.get('message', '')}")
+        maps = resp.body.get("maps") if isinstance(resp.body.get("maps"), list) else []
+        return JSONResponse(content={"ok": True, "maps": maps, "count": len(maps)})
+
     # -- 写：commands ----------------------------------------------------- #
     @app.post(API_PREFIX + "/commands")
     async def post_command(request: Request) -> JSONResponse:

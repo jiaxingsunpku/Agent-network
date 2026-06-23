@@ -60,6 +60,13 @@ class CommandType(str, Enum):
     """下行命令类型白名单（docs/protocol.md §5）。"""
 
     SET_SIGNAL_PLAN = "set_signal_plan"
+    #: 交通信号域：粗粒度「控制信号推理」——启停 / 选择 SignalVision 信号控制算法
+    #: （maxpressure/colight/...），映射到 SV `/api/simulation/start`/`/stop`，真驱动 SUMO
+    #: （docs/adapters.md §3.5）。区别于细粒度 `set_signal_plan`（写展示层、不驱动 SUMO）。
+    CONTROL_SIGNAL_INFERENCE = "control_signal_inference"
+    #: 交通信号域：切换 SignalVision 活动路网地图（map_path），映射到 SV `/api/load-map`
+    #: （切图前自动停当前仿真以保几何一致，docs/adapters.md §3.6）。仿真级（map 全局）操作。
+    SET_SIGNAL_MAP = "set_signal_map"
     #: P8 视频域：请求 vision hub 对某摄像头/路段做一次视频推理、回传文本结果（docs/video.md §10）。
     REQUEST_VIDEO_TEXT = "request_video_text"
 

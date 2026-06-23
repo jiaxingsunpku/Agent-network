@@ -36,15 +36,25 @@ from anp.contracts import (
     parse_iso,
     parse_payload,
 )
-from anp.control import signal_plan_safety_decision
+from anp.control import (
+    signal_inference_safety_decision,
+    signal_map_safety_decision,
+    signal_plan_safety_decision,
+)
 from anp.messaging import make_consumer, publish
 
 from .client import SignalVisionClient
 from .config import SignalVisionExecConfig
 
 #: 执行体声明的能力与可接收命令类型（与 lifecycle 注册一致）。
+#: 收：细粒度 `set_signal_plan`（写展示层、不驱动 SUMO）、粗粒度 `control_signal_inference`
+#: （启停/选算法、真驱动 SUMO，§3.5）、`set_signal_map`（切路网，§3.6）。
 EXEC_CAPABILITIES = ("exec",)
-EXEC_COMMAND_TYPES = (CommandType.SET_SIGNAL_PLAN.value,)
+EXEC_COMMAND_TYPES = (
+    CommandType.SET_SIGNAL_PLAN.value,
+    CommandType.CONTROL_SIGNAL_INFERENCE.value,
+    CommandType.SET_SIGNAL_MAP.value,
+)
 
 
 class SignalVisionExecutor:
@@ -74,8 +84,12 @@ class SignalVisionExecutor:
 
     # -- 本地 Safety Guard（参数级 + 路由）-------------------------------- #
     def safety_guard(self, payload: CommandPayload) -> SafetyDecision:
-        """参数级规则（共享自 :mod:`anp.control`）。路由约束在 :meth:`_resolve_junction`。"""
+        """参数级规则（共享自 :mod:`anp.control`），按命令类型分派。路由约束另见 :meth:`handle_command`。"""
 
+        if payload.command_type == CommandType.CONTROL_SIGNAL_INFERENCE:
+            return signal_inference_safety_decision(payload)
+        if payload.command_type == CommandType.SET_SIGNAL_MAP:
+            return signal_map_safety_decision(payload)
         return signal_plan_safety_decision(payload)
 
     def _resolve_junction(self, intersection_id: str | None) -> str | None:
@@ -86,8 +100,12 @@ class SignalVisionExecutor:
         return self._intersection_to_junction.get(intersection_id)
 
     # -- 执行：映射 → 调 SV 写端点 ---------------------------------------- #
-    def _apply(self, junction_id: str, intersection_id: str, payload: CommandPayload) -> None:
-        """把 set_signal_plan 映射成 SV traffic_light 并 POST；失败抛 RuntimeError（→ ack FAILED）。"""
+    def _apply_signal_plan(self, junction_id: str, intersection_id: str, payload: CommandPayload) -> None:
+        """把 set_signal_plan 映射成 SV traffic_light 并 POST；失败抛 RuntimeError（→ ack FAILED）。
+
+        注：`/update` 写 SV 全局展示层 manager，**不驱动运行中 SUMO**（docs/adapters.md §3.4）；
+        真驱动 SUMO 的粗粒度控制走 :meth:`_apply_inference`。
+        """
 
         params = payload.params or {}
         desired_phase = params.get("desired_phase")
@@ -108,6 +126,55 @@ class SignalVisionExecutor:
             "intersection_id": intersection_id,
             "junction_id": junction_id,
             "traffic_light": traffic_light,
+            "params": dict(params),
+        }
+
+    def _apply_inference(self, payload: CommandPayload) -> None:
+        """把 control_signal_inference 映射成 SV 仿真启停（真驱动 SUMO）；失败抛 RuntimeError（→ FAILED）。
+
+        ``action=start`` → ``POST /api/simulation/start {"config": algorithm}``（按所选算法跑信号控制
+        推理，SUMO 真驱动信号）；``action=stop`` → ``POST /api/simulation/stop``。action/algorithm 已过
+        Safety Guard。这是「命令→效果→感知回流」能合拢的路径（与 `/update` 形成对照）。
+        """
+
+        params = payload.params or {}
+        action = params.get("action")
+        algorithm = params.get("algorithm")
+        if action == "start":
+            resp = self.client.start_simulation(algorithm)
+        else:  # action == "stop"（Safety Guard 已限定 action ∈ {start, stop}）
+            resp = self.client.stop_simulation()
+        if not resp.ok:
+            raise RuntimeError(
+                f"SV simulation {action} 失败 status={resp.status_code} body={resp.body}"
+            )
+        self.applied_plan = {
+            "action": action,
+            "algorithm": algorithm if action == "start" else None,
+            "sv_response": dict(resp.body),
+            "params": dict(params),
+        }
+
+    def _apply_map(self, payload: CommandPayload) -> None:
+        """把 set_signal_map 映射成 SV 切路网（``/api/load-map``）；失败抛 RuntimeError（→ FAILED）。
+
+        切图前先 best-effort 停当前仿真——SV `/api/network` 读全局 manager、`/junctions/summary`
+        仿真时读 sim manager，停仿真后两者同读全局，保证切图后几何一致（docs/adapters.md §3.6）。
+        map_path 已过 Safety Guard（非空、无穿越、.pkl/.json）。
+        """
+
+        params = payload.params or {}
+        map_path = params.get("map_path")
+        self.client.stop_simulation()  # best-effort：无运行中仿真返回 ok=False，忽略
+        resp = self.client.load_map(map_path)
+        if not resp.ok:
+            raise RuntimeError(
+                f"SV load-map 失败 map={map_path!r} status={resp.status_code} body={resp.body}"
+            )
+        self.applied_plan = {
+            "action": "load_map",
+            "map_path": map_path,
+            "sv_response": dict(resp.body),
             "params": dict(params),
         }
 
@@ -152,22 +219,27 @@ class SignalVisionExecutor:
             self.rejected += 1
             return self._ack(payload, AckStatus.REJECTED, safety=decision)
 
-        # 路由约束：object_id（intersection_id）须映射到某 SV junction。
-        intersection_id = env.scope.object_id
-        junction_id = self._resolve_junction(intersection_id)
-        if junction_id is None:
-            self._seen.add(cid)
-            self.rejected += 1
-            route = SafetyDecision(
-                allowed=False,
-                decision="reject",
-                reason=f"object_id 未映射到 SV junction（map={self.config.junction_map}）: {intersection_id!r}",
-            )
-            return self._ack(payload, AckStatus.REJECTED, safety=route)
-
-        # 执行：调 SV 写端点。
+        # 执行：按命令类型分派。
+        # - set_signal_plan：细粒度、per-junction，须 object_id→SV junction 路由约束，调 /update。
+        # - control_signal_inference：粗粒度、仿真级（map 全局），无 junction 路由，调 /simulation/start|stop。
         try:
-            self._apply(junction_id, intersection_id, payload)
+            if payload.command_type == CommandType.CONTROL_SIGNAL_INFERENCE:
+                self._apply_inference(payload)
+            elif payload.command_type == CommandType.SET_SIGNAL_MAP:
+                self._apply_map(payload)
+            else:
+                intersection_id = env.scope.object_id
+                junction_id = self._resolve_junction(intersection_id)
+                if junction_id is None:
+                    self._seen.add(cid)
+                    self.rejected += 1
+                    route = SafetyDecision(
+                        allowed=False,
+                        decision="reject",
+                        reason=f"object_id 未映射到 SV junction（map={self.config.junction_map}）: {intersection_id!r}",
+                    )
+                    return self._ack(payload, AckStatus.REJECTED, safety=route)
+                self._apply_signal_plan(junction_id, intersection_id, payload)
         except Exception as exc:  # noqa: BLE001 - SV 不可达 / 返回失败 → FAILED
             self._seen.add(cid)
             self.failed += 1
@@ -243,7 +315,8 @@ class SignalVisionExecutor:
 
 
 # --------------------------------------------------------------------------- #
-# lifecycle / heartbeat（执行体：capabilities=[exec], command_types=[set_signal_plan]）
+# lifecycle / heartbeat（执行体：capabilities=[exec], command_types=EXEC_COMMAND_TYPES
+#   = [set_signal_plan, control_signal_inference, set_signal_map]）
 # --------------------------------------------------------------------------- #
 def _exec_source(agent_id: str) -> Source:
     return Source(system=SourceSystem.COLLABORATIVE_AGENT, agent_id=agent_id)

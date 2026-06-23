@@ -79,10 +79,10 @@ export function makeFallbackRuntime(now = Date.now()): WorldModelRuntime {
       time: simClock(frame - 1)
     },
     {
-      id: `runtime-${frame}-train`,
+      id: `runtime-${frame}-infer`,
       severity: "info" as const,
-      title: `CoLight 策略训练 episode ${1200 + (frame % 280)}，奖励 ${(88 + Math.sin(phase) * 6).toFixed(1)}`,
-      target: "signal-train",
+      title: `SignalVision 控制推理运行中 · maxpressure · 路口相位实时切换`,
+      target: "signal-control",
       time: simClock(frame - 2)
     }
   ];
@@ -109,14 +109,16 @@ export function makeFallbackRuntime(now = Date.now()): WorldModelRuntime {
       processedRecords,
       incidents: Math.max(1, Math.round(congestionIndex * 6))
     },
+    // 遗留兼容字段：`WorldModelRuntime.training` 结构保留，但 ANP 接 SignalVision（推理/控制）不接 SignalTrain（训练），
+    // SV 信号世界模型页面已不读它（B-7 去训练入口）；此处仅为非 SV mock 页面回落，措辞已去训练化（控制推理运行态）。
     training: {
-      jobName: "CoLight-PPO-signal-control",
+      jobName: "SignalVision 控制推理",
       progress: Math.round((frame % 180) / 1.8),
       episode: 1200 + (frame % 280),
       reward: Number((88 + Math.sin(phase) * 6 + congestionIndex * 5).toFixed(1)),
       loss: Number(Math.max(0.02, 0.18 - (frame % 120) * 0.001 + Math.abs(Math.cos(phase)) * 0.02).toFixed(3)),
       etaMin: Math.max(1, 24 - Math.floor((frame % 180) / 8)),
-      status: "训练任务运行中"
+      status: "控制推理运行中"
     },
     video: {
       onlineCameras: 24,

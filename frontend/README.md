@@ -14,6 +14,8 @@ npm install            # 依赖与老仓库锁文件一致，可复用其 node_m
 npm run dev            # 开发服务 18180
 npm run build          # tsc -b + vite build → dist/
 npm run preview        # 18181，预览 dist
+npm run test:visual    # 默认 mock 壳视觉/交互冒烟
+npm run test:ui        # 网关模式模块按钮、模型边界、响应式布局 QA
 ```
 
 ## 接入网关（二选一）

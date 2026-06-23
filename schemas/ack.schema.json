@@ -17,6 +17,8 @@
       "description": "下行命令类型白名单（docs/protocol.md §5）。",
       "enum": [
         "set_signal_plan",
+        "control_signal_inference",
+        "set_signal_map",
         "request_video_text"
       ],
       "title": "CommandType",

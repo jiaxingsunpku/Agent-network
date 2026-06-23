@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""运行 SignalVision 信号控制**执行体**（P6，接真实 SV Dashboard）。
+"""运行 SignalVision 信号控制**执行体**（P6/B-6，接真实 SV Dashboard）。
 
-订阅控制层 `anp.traffic.command.v1` → 去重/过期/目标匹配/本地 Safety Guard →
-调真实 SV `POST /api/junctions/<id>/update` 写 `traffic_light` → 回 ack 到
-`anp.traffic.ack.v1`。启动时注册（lifecycle）、周期发心跳（携 SV 可达性，守护线程）、
-退出时下线。Ctrl-C 停止。
+订阅控制层 `anp.traffic.command.v1` → 去重/过期/目标匹配/本地 Safety Guard → 调真实 SV →
+回 ack 到 `anp.traffic.ack.v1`。处理三类命令（= `EXEC_COMMAND_TYPES`）：
+  - `set_signal_plan`（细粒度相位）→ `POST /api/junctions/<id>/update` 写 traffic_light
+    （写 SV 全局展示层，**不驱动运行中 SUMO**，见 docs/adapters.md §3.4）。
+  - `control_signal_inference`（粗粒度启停/选算法）→ `POST /api/simulation/start|stop`
+    （**真驱动 SUMO**，命令→效果→感知回流闭环合得拢，见 docs/adapters.md §3.5）。
+  - `set_signal_map`（全局换图）→ 先停仿真 → `POST /api/load-map`
+    （切换活动路网，无 per-junction 路由，见 docs/adapters.md §3.6）。
+启动时注册（lifecycle）、周期发心跳（携 SV 可达性，守护线程）、退出时下线。Ctrl-C 停止。
 
 配合 run_gateway.py + run_signalvision_adapter.py（或 run_virtual_agent.py）可端到端
 跑通真实数据源上的命令闭环。命令 `scope.object_id`（intersection_id）经 junction_map
@@ -30,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from anp.adapters.signalvision import (  # noqa: E402
     DEFAULT_JUNCTION_MAP,
+    EXEC_COMMAND_TYPES,
     SV_EXEC_AGENT_ID,
     SignalVisionExecConfig,
     SignalVisionExecutor,
@@ -132,7 +138,7 @@ def main() -> int:
         exec_lifecycle_envelope(agent_id=config.agent_id, registered=True),
         flush=True,
     )
-    print(f"[sv-exec] 已注册 {config.agent_id}（exec, command_types=[set_signal_plan]）")
+    print(f"[sv-exec] 已注册 {config.agent_id}（exec, command_types={list(EXEC_COMMAND_TYPES)}）")
 
     stop = threading.Event()
     hb_thread = threading.Thread(

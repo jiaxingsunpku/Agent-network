@@ -7,10 +7,31 @@
 
 from __future__ import annotations
 
+from .command_modules import (
+    REQUEST_VIDEO_TEXT,
+    VIDEO_COMMAND_MODULES,
+    CommandModule,
+    get_command_module,
+    list_command_modules,
+)
 from .config import VideoConfig, get_video_config
+from .orchestrator import (
+    DEFAULT_VISIONHUB_ROSTER,
+    CommandModuleError,
+    NoTargetsError,
+    PublishUnavailable,
+    VideoTaskOrchestrator,
+)
 from .qa import VideoQAService
 from .retrieval import SearchFilters
 from .store import SqliteVideoTextStore, VideoTextStore
+from .tasks import (
+    SqliteVideoTaskStore,
+    TaskCommand,
+    TaskScope,
+    VideoTask,
+    VideoTaskStore,
+)
 
 __all__ = [
     "VideoConfig",
@@ -19,4 +40,22 @@ __all__ = [
     "SqliteVideoTextStore",
     "SearchFilters",
     "VideoQAService",
+    # 命令模块注册表（P9）
+    "REQUEST_VIDEO_TEXT",
+    "VIDEO_COMMAND_MODULES",
+    "CommandModule",
+    "get_command_module",
+    "list_command_modules",
+    # Task 抽象 + 任务存储（P9）
+    "TaskScope",
+    "TaskCommand",
+    "VideoTask",
+    "VideoTaskStore",
+    "SqliteVideoTaskStore",
+    # 编排器（P9）
+    "VideoTaskOrchestrator",
+    "DEFAULT_VISIONHUB_ROSTER",
+    "CommandModuleError",
+    "NoTargetsError",
+    "PublishUnavailable",
 ]

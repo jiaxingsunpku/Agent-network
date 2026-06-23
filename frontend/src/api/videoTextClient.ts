@@ -43,12 +43,11 @@ export interface VideoQueryRequest {
   limit?: number;
 }
 
-export async function queryVideoText(req: VideoQueryRequest): Promise<VideoQueryResponse> {
-  const response = await fetch(`${API_BASE}${VIDEO_PREFIX}/query`, {
-    method: "POST",
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${VIDEO_PREFIX}${path}`, {
     cache: "no-store",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify(req)
+    ...init
   });
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
@@ -61,5 +60,159 @@ export async function queryVideoText(req: VideoQueryRequest): Promise<VideoQuery
     }
     throw new Error(message);
   }
-  return (await response.json()) as VideoQueryResponse;
+  return (await response.json()) as T;
+}
+
+export async function queryVideoText(req: VideoQueryRequest): Promise<VideoQueryResponse> {
+  return apiFetch<VideoQueryResponse>("/query", { method: "POST", body: JSON.stringify(req) });
+}
+
+// —— 位置枚举 + 事件数据库浏览（task2）：从 ANP 文本库派生，纯读 ——
+
+export interface CameraFacet {
+  camera_id: string;
+  source_id?: number | null; // wangxuan 真身稳定键（目录来源时有值）
+  name?: string | null; // 真身原名（tooltip）
+  camera_position?: string | null; // 方位（东北角/西南角…，目录来源时为真实值）
+  event_count: number;
+}
+
+export interface IntersectionFacet {
+  intersection_id?: string | null;
+  intersection_name?: string | null;
+  road_name?: string | null;
+  district?: string | null;
+  event_count: number;
+  cameras: CameraFacet[];
+}
+
+export interface LocationsResponse {
+  intersections: IntersectionFacet[];
+  total_events: number;
+}
+
+export interface EventRecord {
+  event_id: string;
+  event_ts?: string | null;
+  source_agent_id?: string | null;
+  confidence?: number | null;
+  parent_trace_id?: string | null;
+  camera_id?: string | null;
+  road_name?: string | null;
+  intersection_id?: string | null;
+  road_segment?: string | null;
+  start_ts?: string | null;
+  end_ts?: string | null;
+  text: string;
+  summary?: string | null;
+  category?: string | null;
+  tags: string[];
+  entities: Record<string, unknown>;
+  artifact_ref?: string | null;
+  source_model?: string | null;
+  envelope?: Record<string, unknown> | null;
+}
+
+export interface EventBrowseResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: EventRecord[];
+}
+
+export interface BrowseEventsParams {
+  limit?: number;
+  offset?: number;
+  intersection_id?: string;
+  camera_id?: string;
+  road_name?: string;
+  category?: string;
+  q?: string;
+  time_from?: string;
+  time_to?: string;
+}
+
+export async function listLocations(): Promise<LocationsResponse> {
+  return apiFetch<LocationsResponse>("/locations", { method: "GET" });
+}
+
+export async function browseEvents(params: BrowseEventsParams = {}): Promise<EventBrowseResponse> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    qs.set(key, String(value));
+  }
+  const query = qs.toString();
+  return apiFetch<EventBrowseResponse>(`/events${query ? `?${query}` : ""}`, { method: "GET" });
+}
+
+export async function getEvent(eventId: string): Promise<EventRecord> {
+  return apiFetch<EventRecord>(`/events/${encodeURIComponent(eventId)}`, { method: "GET" });
+}
+
+// —— 协作视频任务（P9）：编排器扇出定向命令调度多 vision hub，回流文本聚合成态势 ——
+
+export type TaskStatus = "pending" | "running" | "aggregated" | "failed";
+export type CommandStatus = "pending" | "dispatched" | "returned" | "failed";
+
+export interface TaskScopeInput {
+  road_name?: string;
+  camera_id?: string;
+  intersection_id?: string;
+  road_segment?: string;
+  time_from?: string;
+  time_to?: string;
+  target_agent_ids?: string[];
+}
+
+export interface TaskCommand {
+  command_id: string;
+  target_agent_id: string;
+  status: CommandStatus;
+  returned_event_id?: string | null;
+  returned_ts?: string | null;
+}
+
+export interface VideoTask {
+  task_id: string;
+  module: string;
+  prompt: string;
+  scope: TaskScopeInput;
+  commands: TaskCommand[];
+  status: TaskStatus;
+  answer?: string | null;
+  evidence: VideoEvidenceItem[];
+  warnings: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommandModule {
+  key: string;
+  title: string;
+  description: string;
+  implemented: boolean;
+  command_type?: string | null;
+}
+
+export interface CreateTaskRequest {
+  prompt: string;
+  module?: string;
+  scope: TaskScopeInput;
+}
+
+export async function createVideoTask(req: CreateTaskRequest): Promise<VideoTask> {
+  return apiFetch<VideoTask>("/tasks", { method: "POST", body: JSON.stringify(req) });
+}
+
+export async function listVideoTasks(): Promise<VideoTask[]> {
+  return apiFetch<VideoTask[]>("/tasks", { method: "GET" });
+}
+
+export async function getVideoTask(taskId: string): Promise<VideoTask> {
+  return apiFetch<VideoTask>(`/tasks/${encodeURIComponent(taskId)}`, { method: "GET" });
+}
+
+export async function listCommandModules(): Promise<CommandModule[]> {
+  return apiFetch<CommandModule[]>("/command-modules", { method: "GET" });
 }

@@ -8,6 +8,8 @@ export interface MetricMap {
 
 export type AgentNetworkCommandType =
   | "set_signal_plan"
+  | "control_signal_inference"
+  | "set_signal_map"
   | "set_observation_rate"
   | "enter_maintenance_demo"
   | "sv.inference.start"

@@ -42,6 +42,9 @@ class GatewayConfig:
     admin_token: str | None = field(default_factory=lambda: os.environ.get("AGENT_NETWORK_ADMIN_TOKEN") or None)
     #: 是否启动后台 Kafka 消费线程（状态/ack/registry）。测试用 False。
     with_consumers: bool = True
+    #: SignalVision Dashboard 根地址（仅 `/sv-network` 只读地图几何端点用；前端经网关取真实路网，
+    #: 不直连 SV）。这是网关唯一一处直连外部源 HTTP 的「务实例外」——几何只读、不入 Kafka 黑板。
+    sv_base_url: str = field(default_factory=lambda: os.environ.get("ANP_SV_BASE_URL") or "http://127.0.0.1:8080")
 
     @classmethod
     def from_env(cls) -> "GatewayConfig":

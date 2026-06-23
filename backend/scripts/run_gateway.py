@@ -48,12 +48,13 @@ def main() -> int:
 
     app = create_app(state)
 
-    # P7：把视频文本问答路由 co-host 到网关进程（前端复用现有 /api/* 反代）。
-    # 逻辑独立在 anp/video，不混入交通域世界状态计算（AGENTS.md §3.4）。
+    # P7/P9：把视频文本问答 + 协作任务路由 co-host 到网关进程（前端复用现有 /api/* 反代）。
+    # 逻辑独立在 anp/video，不混入交通域世界状态计算、不在网关算聚合（AGENTS.md §3.4）。
+    # 复用网关 producer 发视频命令（anp.video.command.v1，≠ 交通命令 topic）。
     from anp.video.routes import include_video_routes  # noqa: E402
 
-    vstore, _ = include_video_routes(app)
-    print(f"[gateway] 已挂载视频文本问答 /api/agent-network/video-text/*（库内 {vstore.count()} 条）")
+    vstore, _, _ = include_video_routes(app, producer=producer, command_bootstrap=args.bootstrap)
+    print(f"[gateway] 已挂载视频文本问答 + 协作任务 /api/agent-network/video-text/*（库内 {vstore.count()} 条）")
 
     print(f"[gateway] 监听 http://{args.host}:{args.port}/api/agent-network …")
     try:

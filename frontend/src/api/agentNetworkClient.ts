@@ -115,6 +115,71 @@ export async function fetchNetworkSnapshot(scope?: string): Promise<NetworkSnaps
   return normalizeNetworkSnapshot(data);
 }
 
+export interface SvNetworkJunction {
+  id: string;
+  x: number;
+  y: number;
+  congestion: number;
+  junction_type: string;
+  total_vehicles: number;
+  total_halting: number;
+}
+
+export interface SvNetworkEdge {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  lanes: number;
+  length: number;
+}
+
+export interface SvNetworkGeometry {
+  ok: boolean;
+  source?: string;
+  junctions: SvNetworkJunction[];
+  edges: SvNetworkEdge[];
+  bounds: { minX: number; maxX: number; minY: number; maxY: number };
+  junction_count: number;
+}
+
+/** 真实 SV 路网几何（网关 /sv-network relay SV /api/network）。不可达/未启用时返回 null（前端回落静态图）。 */
+export async function fetchSvNetwork(): Promise<SvNetworkGeometry | null> {
+  try {
+    const response = await fetchAgentNetwork("/sv-network", { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    if (!response.headers.get("content-type")?.includes("application/json")) return null;
+    const data = await response.json();
+    if (!data?.ok || !Array.isArray(data.edges) || !Array.isArray(data.junctions)) return null;
+    return data as SvNetworkGeometry;
+  } catch {
+    return null;
+  }
+}
+
+export interface SvMapEntry {
+  name: string;
+  path: string;
+  size?: number;
+}
+
+/** SV 可用路网地图列表（网关 /sv-maps relay SV /api/maps）。不可达/未启用时返回 []（前端不显示切图下拉）。 */
+export async function fetchSvMaps(): Promise<SvMapEntry[]> {
+  try {
+    const response = await fetchAgentNetwork("/sv-maps", { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) return [];
+    if (!response.headers.get("content-type")?.includes("application/json")) return [];
+    const data = await response.json();
+    if (!data?.ok || !Array.isArray(data.maps)) return [];
+    return (data.maps as any[])
+      .filter((m) => m && typeof m.path === "string" && m.path)
+      .map((m) => ({ name: String(m.name ?? m.path), path: String(m.path), size: Number(m.size ?? 0) }));
+  } catch {
+    return [];
+  }
+}
+
 export interface InspectorBlock {
   type: "metric_grid" | "kv_list" | "event_list" | "timeseries" | "json" | string;
   title?: string;

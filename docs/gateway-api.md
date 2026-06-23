@@ -119,6 +119,23 @@
 
 前端 `fetchTimeseriesJson` 把 `ok:false` 当错误结果处理，主 snapshot/projection 不受影响。
 
+## 5b. 视频文本问答 + 协作任务（co-host，P7/P9）
+
+视频域逻辑独立在 `backend/anp/video/`，**co-host** 到网关进程（同命名空间，前端复用 `/api/*` 反代）。网关
+**不算视频聚合**（AGENTS §3.4，聚合在 `video/orchestrator.py` 任务体侧）；视频命令直发 `anp.video.command.v1`
+（≠ 交通 `anp.traffic.command.v1`，故不复用 §3 的 `/commands` 管道，但守同样校验纪律）。契约/语义见
+[video.md](video.md) §6/§11、命令模块族见 [adapters.md](adapters.md) §5.7。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/agent-network/video-text/events` | 入库一条视频文本事件（P7） |
+| POST | `/api/agent-network/video-text/query` | 检索 + 问答（`QueryResponse`，P7） |
+| GET | `/api/agent-network/video-text/health` | 库内条数 + LLM 是否启用 |
+| POST | `/api/agent-network/video-text/tasks` | 新建协作视频任务 → 编排器**扇出 N 条定向命令**（每条带 `target_agent_id`，禁 broadcast）→ 返回 `VideoTask`（含各 `command_id`）。占位模块 → 400；无 producer → 503（P9） |
+| GET | `/api/agent-network/video-text/tasks` | 任务列表（批量本地刷新回流状态；全部回流时缓存本地规则摘要，不出网，P9） |
+| GET | `/api/agent-network/video-text/tasks/{id}` | 任务详情（按 `command_id` 归因 + 聚合答案 + 证据；默认本地规则摘要快路径，`?llm=true` 可重新调用 LLM 精炼；未知 → 404，P9） |
+| GET | `/api/agent-network/video-text/command-modules` | 命令模块声明枚举（区分可下发/占位，P9） |
+
 ## 6. 部署形态（P4 落地）
 
 - 开发：前端 `cd frontend && npm run dev`（18180）。默认**不设** `VITE_AGENT_NETWORK_API_BASE`，由 vite dev/preview 把 `/api/*` 反代到 `VITE_GATEWAY_PROXY`（默认 `http://127.0.0.1:8000`，即 `run_gateway.py`）；设了绝对 base 则客户端直连、不反代（生产/前端与网关不同源）。

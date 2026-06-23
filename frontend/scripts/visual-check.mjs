@@ -52,25 +52,14 @@ await page.getByRole("button", { name: /路口流量监控世界模型/ }).waitF
 await page.getByRole("button", { name: /交通地图/ }).waitFor();
 await assertCanvasNonBlank(page, "default traffic map");
 
-await page.getByRole("button", { name: /模型管理/ }).click();
-await page.getByRole("heading", { name: "模型管理" }).waitFor();
-await page.getByRole("button", { name: /MaxPressure 基线/ }).click();
-await page.getByRole("button", { name: /启动评测/ }).click();
-await page.locator('.tool-feedback:has-text("启动评测")').waitFor();
+await page.getByRole("button", { name: /控制策略/ }).click();
+await page.getByRole("heading", { name: "控制策略" }).waitFor();
+// 真·control_signal_inference：点「开始推理」→ 网关 /commands（真实下发，出现反馈）。
+await page.getByRole("button", { name: /开始推理/ }).click();
+await page.locator('.tool-feedback:has-text("下发")').waitFor();
 
-await page.getByRole("button", { name: /模型训练/ }).click();
-await page.getByRole("heading", { name: "模型训练" }).waitFor();
-await page.getByRole("heading", { name: "训练配置" }).waitFor();
-await page.locator('label:has-text("数据来源") select').selectOption("train-output-net-207");
-await page.getByText("output-net-207tls").waitFor();
-await page.getByRole("button", { name: /归档训练/ }).click();
-await page.locator('.tool-feedback:has-text("训练归档")').waitFor();
-
-await page.getByRole("button", { name: /持续学习/ }).click();
-await page.getByRole("heading", { name: "持续学习" }).waitFor();
-await page.getByRole("button", { name: /夜间策略离线更新/ }).click();
-await page.getByRole("button", { name: /手动触发/ }).click();
-await page.locator('.tool-feedback:has-text("手动触发自动化")').waitFor();
+// SignalTrain（训练/持续学习）模块已从 SV 信号世界模型移除，不再走查。
+// 控制策略/路口指标/实时交通数据/智能体列表已接真实网关数据（snapshot + /commands）。
 
 await page.getByRole("button", { name: /监控视频流处理世界模型/ }).click();
 await page.getByRole("button", { name: /视频流接入/ }).waitFor();
@@ -82,8 +71,7 @@ await page.getByRole("button", { name: /路口流量监控世界模型/ }).click
 await page.getByRole("button", { name: /实时交通数据/ }).click();
 await page.getByRole("heading", { name: "实时交通数据" }).waitFor();
 await page.locator('.tool-shell-panel .shell-stat-card:has-text("均速")').waitFor();
-await page.getByRole("button", { name: /刷新窗口/ }).click();
-await page.locator('.tool-feedback:has-text("刷新窗口")').waitFor();
+// 实时交通数据已改真实 World Status 聚合（自动刷新，无 mock 刷新按钮）。
 
 await page.screenshot({ path: "visual-simplified-shell.png", fullPage: true });
 await page.close();

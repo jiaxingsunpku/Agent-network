@@ -90,6 +90,21 @@ class SignalVisionClient:
 
         return self._get(f"/api/junctions/{junction_id}")
 
+    def get_network(self) -> SvResponse:
+        """整张路网几何（``GET /api/network`` → ``{junction_count, network_data{edge,node,inter,...}}``）。"""
+
+        return self._get("/api/network")
+
+    def list_maps(self) -> SvResponse:
+        """可用地图列表（``GET /api/maps`` → ``{maps:[{name,path,size}], count, success}``）。"""
+
+        return self._get("/api/maps")
+
+    def get_junctions_summary(self) -> SvResponse:
+        """全部路口摘要（``GET /api/junctions/summary`` → ``{summaries:[{junction_id,position,congestion_level,...}]}``）。"""
+
+        return self._get("/api/junctions/summary")
+
     def junction_state(self, junction_id: str) -> dict[str, Any] | None:
         """取并解包单路口状态字典；不可达 / 不存在 / 失败时返回 ``None``。"""
 
@@ -119,6 +134,38 @@ class SignalVisionClient:
             body["lane_data"] = lane_data
         resp = self._post(f"/api/junctions/{junction_id}/update", body)
         # SV update 端点成功时返回 {"success": true, ...}；HTTP 2xx 但 success=False 视为失败。
+        if resp.ok and not resp.body.get("success", True):
+            return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
+        return resp
+
+    # -- 仿真控制端点（control_signal_inference：启停信号控制算法）------------ #
+    def start_simulation(self, config: str) -> SvResponse:
+        """``POST /api/simulation/start {"config": <algorithm>}`` 起信号控制算法仿真（真驱动 SUMO）。
+
+        SV 成功返回 ``{"success": true, "pid": ...}``；已在运行等情形返回 ``success=False``
+        （归一为 ``ok=False`` → 执行端回 FAILED）。
+        """
+
+        resp = self._post("/api/simulation/start", {"config": config})
+        if resp.ok and not resp.body.get("success", True):
+            return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
+        return resp
+
+    def stop_simulation(self) -> SvResponse:
+        """``POST /api/simulation/stop`` 停仿真。无运行中仿真时 SV 返回 ``success=False`` → ``ok=False``。"""
+
+        resp = self._post("/api/simulation/stop", {})
+        if resp.ok and not resp.body.get("success", True):
+            return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
+        return resp
+
+    def load_map(self, map_path: str) -> SvResponse:
+        """``POST /api/load-map {"map_path": <相对 map 目录路径>}`` 切换活动路网（写全局 junction_manager）。
+
+        SV 成功返回 ``{"success": true, "junction_count": ...}``；地图不存在/不支持等 → ``success=False`` → ``ok=False``。
+        """
+
+        resp = self._post("/api/load-map", {"map_path": map_path})
         if resp.ok and not resp.body.get("success", True):
             return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
         return resp

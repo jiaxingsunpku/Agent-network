@@ -398,6 +398,7 @@ function ProjectionPanel({ projection }: { projection: InspectorProjection }) {
 
 function Trend({ snapshot }: { snapshot: NetworkSnapshot }) {
   const points = snapshot.trend;
+  if (!points.length) return <p className="empty-hint">暂无趋势数据</p>;
   const max = Math.max(...points.map((point) => point.value), 1);
   const path = points.map((point, index) => {
     const x = (index / Math.max(1, points.length - 1)) * 100;

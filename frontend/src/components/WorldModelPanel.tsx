@@ -40,8 +40,7 @@ function statusText(status: WorldModelDefinition["status"]) {
 }
 
 function actionHint(action: WorldModelAction) {
-  if (action.kind === "training") return "套用 SignalTrain 训练工具字段，生成演示训练任务。";
-  if (action.kind === "continual_learning") return "套用 SignalTrain 持续学习流程，展示批次、更新与推送。";
+  if (action.kind === "inference") return "下发 SignalVision 控制推理命令（开始/切换算法），真驱动仿真。";
   if (action.kind === "control") return "只生成演示建议，不下发真实设备。";
   if (action.kind === "report") return "读取已复制的实验结果字段，展示对比报告。";
   return "读取边缘推理或 captured Kafka 结果，生成态势摘要。";
