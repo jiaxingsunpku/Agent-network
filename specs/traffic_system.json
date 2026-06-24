@@ -1,0 +1,9 @@
+{
+  "model_id": "traffic-control",
+  "problem": "路口信号管控：聚合感知观测 → 产出路口 World Status",
+  "member_agent_ids": ["traffic-virtual-001"],
+  "subscribe_topics": ["anp.traffic.perception.observation.v1"],
+  "produce_topics": ["anp.traffic.status.intersection.v1"],
+  "workflow": "system_agent",
+  "weight": 1.0
+}

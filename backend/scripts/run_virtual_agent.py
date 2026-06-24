@@ -26,24 +26,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 让 import agents 可用
 
 from agents.virtual_traffic import (  # noqa: E402
+    AGENT_CAPABILITIES,
+    AGENT_COMMAND_TYPES,
     DEFAULT_HEARTBEAT_SEC,
     DEFAULT_INTERSECTION,
     VIRTUAL_AGENT_ID,
     VirtualTrafficAgent,
     VirtualTrafficExecutor,
-    heartbeat_envelope,
-    lifecycle_envelope,
 )
-from anp.contracts import SequenceGenerator, TrafficTopics  # noqa: E402
-from anp.messaging import make_consumer, make_producer, publish  # noqa: E402
-
-
-def _heartbeat_loop(producer, agent_id: str, interval: float, stop: threading.Event) -> None:
-    seq = SequenceGenerator()
-    while not stop.is_set():
-        publish(producer, TrafficTopics.AGENT_HEARTBEAT, heartbeat_envelope(agent_id=agent_id, sequence=seq.next()))
-        producer.flush()
-        stop.wait(interval)
+from anp.contracts import Channel, TrafficTopics  # noqa: E402
+from anp.messaging import make_consumer, make_producer  # noqa: E402
+from anp.world import WorldClient  # noqa: E402
 
 
 def _executor_loop(executor: VirtualTrafficExecutor, bootstrap: str | None, stop: threading.Event) -> None:
@@ -100,28 +93,26 @@ def main() -> int:
 
     stop = threading.Event()
     threads: list[threading.Thread] = []
-    lifecycle_producer = None
+    world: WorldClient | None = None
 
     if not args.no_exec:
-        # 注册（lifecycle）。
-        lifecycle_producer = make_producer(bootstrap_servers=args.bootstrap)
-        publish(
-            lifecycle_producer,
-            TrafficTopics.AGENT_LIFECYCLE,
-            lifecycle_envelope(agent_id=VIRTUAL_AGENT_ID, registered=True),
-            flush=True,
+        # 自注册成世界公民（带 per-key 通道：本体只覆盖自己模拟的这个路口）。
+        # 走世界级 WorldTopics（registry 双读 world+交通，本体即在统一名册可见）。
+        world = WorldClient(
+            VIRTUAL_AGENT_ID,
+            agent_type="virtual",
+            capabilities=AGENT_CAPABILITIES,
+            command_types=AGENT_COMMAND_TYPES,
+            produces=[
+                Channel(topic=TrafficTopics.OBSERVATION, keys=[args.intersection]),
+                Channel(topic=TrafficTopics.ACK, keys=[args.intersection]),
+            ],
+            consumes=[Channel(topic=TrafficTopics.COMMAND, keys=[args.intersection])],
+            bootstrap=args.bootstrap,
         )
-        print(f"[virtual] 已注册 {VIRTUAL_AGENT_ID}（perception+exec）")
-
-        # 心跳线程。
-        hb_thread = threading.Thread(
-            target=_heartbeat_loop,
-            args=(lifecycle_producer, VIRTUAL_AGENT_ID, DEFAULT_HEARTBEAT_SEC, stop),
-            name="virtual-heartbeat",
-            daemon=True,
-        )
-        hb_thread.start()
-        threads.append(hb_thread)
+        world.register()
+        print(f"[virtual] 已注册 {VIRTUAL_AGENT_ID}（perception+exec, 路口={args.intersection}）")
+        world.start_heartbeat(DEFAULT_HEARTBEAT_SEC, stop)
 
         # 执行线程。
         executor = VirtualTrafficExecutor(agent_id=VIRTUAL_AGENT_ID)
@@ -139,14 +130,9 @@ def main() -> int:
     finally:
         stop.set()
         time.sleep(0.2)
-        if lifecycle_producer is not None:
-            publish(
-                lifecycle_producer,
-                TrafficTopics.AGENT_LIFECYCLE,
-                lifecycle_envelope(agent_id=VIRTUAL_AGENT_ID, registered=False),
-                flush=True,
-            )
-            lifecycle_producer.close()
+        if world is not None:
+            world.deregister()
+            world.close()
             print(f"[virtual] 已下线 {VIRTUAL_AGENT_ID}")
     return 0
 

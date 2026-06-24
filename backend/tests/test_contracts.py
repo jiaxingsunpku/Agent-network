@@ -134,6 +134,8 @@ def test_confidence_bounds():
         ("status.intersection.schema.json", c.IntersectionStatusPayload),
         ("command.schema.json", c.CommandPayload),
         ("ack.schema.json", c.AckPayload),
+        ("agent.lifecycle.schema.json", c.AgentLifecyclePayload),
+        ("agent.heartbeat.schema.json", c.AgentHeartbeatPayload),
     ],
 )
 def test_schema_files_in_sync_with_models(filename, model):
@@ -146,3 +148,23 @@ def test_schema_files_in_sync_with_models(filename, model):
     committed.pop("title", None)
     generated.pop("title", None)
     assert committed == generated
+
+
+def test_lifecycle_channels_backward_compatible():
+    """旧 lifecycle payload（无 produces/consumes/weight）仍能 validate，按默认值。"""
+
+    old = c.AgentLifecyclePayload.model_validate(
+        {"agent_id": "a", "agent_type": "virtual", "capabilities": ["perception"], "command_types": []}
+    )
+    assert old.produces == [] and old.consumes == [] and old.weight == 1.0
+
+    new = c.AgentLifecyclePayload(
+        agent_id="a",
+        agent_type="virtual",
+        produces=[c.Channel(topic="anp.traffic.perception.observation.v1", keys=["gg-xiongchu-minzu"])],
+        weight=2.0,
+    )
+    assert new.produces[0].keys == ["gg-xiongchu-minzu"]
+    assert new.weight == 2.0
+    # 通道 keys 缺省=整条 topic（空列表）。
+    assert c.Channel(topic="t").keys == []

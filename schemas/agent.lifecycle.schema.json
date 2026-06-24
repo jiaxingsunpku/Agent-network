@@ -1,6 +1,31 @@
 {
+  "$defs": {
+    "Channel": {
+      "additionalProperties": false,
+      "description": "agent 的一条「通道」声明：它在某个 ``topic`` 上覆盖哪些实体 ``keys``。\n\n``keys`` 为空 = 整条 topic、不分实体；非空 = 只覆盖这些实体（如某路口\n``[\"intersection_1_1\"]``）。Kafka 订阅仍是 topic 级，key 只进声明 / catalog /\n寻址，客户端按 key 过滤留作后续。",
+      "properties": {
+        "topic": {
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        },
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Keys",
+          "type": "array"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "title": "Channel",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
-  "description": "注册/下线（topic anp.traffic.agent.lifecycle.v1，docs/protocol.md §3）。",
+  "description": "注册/下线（统一世界名册 anp.world.agent.lifecycle.v1，docs/protocol.md §3）。",
   "properties": {
     "agent_id": {
       "minLength": 1,
@@ -25,6 +50,26 @@
       },
       "title": "Command Types",
       "type": "array"
+    },
+    "produces": {
+      "items": {
+        "$ref": "#/$defs/Channel"
+      },
+      "title": "Produces",
+      "type": "array"
+    },
+    "consumes": {
+      "items": {
+        "$ref": "#/$defs/Channel"
+      },
+      "title": "Consumes",
+      "type": "array"
+    },
+    "weight": {
+      "default": 1.0,
+      "minimum": 0.0,
+      "title": "Weight",
+      "type": "number"
     }
   },
   "required": [

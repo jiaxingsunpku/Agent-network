@@ -24,12 +24,15 @@ done
 while IFS= read -r raw; do
   line="${raw%%#*}"                       # 去注释
   [ -z "${line//[[:space:]]/}" ] && continue   # 跳空行
-  read -r topic parts repl _ <<<"$line"
-  echo "[create_topics] $topic (partitions=$parts rf=$repl)"
+  read -r topic parts repl cfg <<<"$line"
+  extra=()
+  [ -n "${cfg:-}" ] && extra=(--config "$cfg")
+  echo "[create_topics] $topic (partitions=$parts rf=$repl${cfg:+ config=$cfg})"
   # </dev/null：避免 docker exec 吞掉 while-read 的 stdin（否则只会建第一个 topic）
   dc exec -T kafka "$KT" --bootstrap-server "$BOOTSTRAP" \
     --create --if-not-exists \
-    --topic "$topic" --partitions "$parts" --replication-factor "$repl" </dev/null
+    --topic "$topic" --partitions "$parts" --replication-factor "$repl" \
+    ${extra[@]+"${extra[@]}"} </dev/null
 done <"$TOPICS_FILE"
 
 echo "[create_topics] 当前 topic 列表："

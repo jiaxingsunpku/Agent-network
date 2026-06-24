@@ -12,6 +12,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..contracts import Channel
 from .constants import HEARTBEAT_OFFLINE_TTL_SEC, HEARTBEAT_ONLINE_TTL_SEC
 
 
@@ -33,6 +34,11 @@ class AgentRecord(BaseModel):
     agent_type: str = Field(min_length=1)
     capabilities: list[str] = Field(default_factory=list)
     command_types: list[str] = Field(default_factory=list)
+    #: 统一世界通道声明（agent 在哪些 topic/实体上产/消，catalog/发现用）。
+    produces: list[Channel] = Field(default_factory=list)
+    consumes: list[Channel] = Field(default_factory=list)
+    #: 协作权重，先开槽默认 1.0、暂不驱动逻辑。
+    weight: float = Field(default=1.0, ge=0.0)
     registered_at: datetime
     #: 心跳 payload 里的自报状态（online/degraded/offline…），无心跳时为 None。
     reported_status: str | None = None

@@ -101,3 +101,66 @@ def test_apply_envelope_ignores_unrelated():
         ),
     )
     assert reg.apply_envelope(obs) is False
+
+
+def test_register_with_channels_and_catalog():
+    reg = Registry()
+    reg.register(
+        agent_id="a",
+        agent_type="virtual",
+        capabilities=["perception"],
+        produces=[c.Channel(topic="t.obs", keys=["int-1"])],
+        consumes=[c.Channel(topic="t.cmd", keys=["int-1"])],
+        weight=2.0,
+        now=BASE,
+    )
+    rec = reg.get("a")
+    assert rec.weight == 2.0 and rec.produces[0].topic == "t.obs"
+
+    cat = reg.catalog_by_topic()
+    assert "a" in cat["t.obs"]["producers"]
+    assert "a" in cat["t.obs"]["keys"]["int-1"]["producers"]
+    assert "a" in cat["t.cmd"]["consumers"]
+
+    # 覆盖查询：给 key 只命中覆盖该实体的；通道声明了 keys 则不覆盖其它 key。
+    assert [r.agent_id for r in reg.agents_covering("t.obs", "int-1")] == ["a"]
+    assert [r.agent_id for r in reg.agents_covering("t.obs")] == ["a"]
+    assert reg.agents_covering("t.obs", "other") == []
+    assert [r.agent_id for r in reg.agents_with_capability("perception")] == ["a"]
+
+
+def test_register_preserves_channels_when_not_provided():
+    reg = Registry()
+    reg.register(agent_id="a", agent_type="virtual", produces=[c.Channel(topic="t.obs")], weight=3.0, now=BASE)
+    # 重复注册只刷新能力、不带通道 → 通道/weight 保留。
+    reg.register(agent_id="a", agent_type="virtual", capabilities=["x"], now=BASE)
+    rec = reg.get("a")
+    assert rec.produces and rec.produces[0].topic == "t.obs" and rec.weight == 3.0
+
+
+def test_apply_envelope_carries_channels_and_weight():
+    reg = Registry()
+    env = c.make_envelope(
+        event_type=c.EventType.AGENT_REGISTERED,
+        source=c.Source(system=c.SourceSystem.PLATFORM, agent_id="m"),
+        payload=c.AgentLifecyclePayload(
+            agent_id="m",
+            agent_type="model",
+            capabilities=["model"],
+            produces=[c.Channel(topic="t.status")],
+            consumes=[c.Channel(topic="t.obs")],
+            weight=1.5,
+        ),
+    )
+    assert reg.apply_envelope(env, now=BASE)
+    rec = reg.get("m")
+    assert rec.weight == 1.5 and rec.produces[0].topic == "t.status"
+    assert "m" in reg.catalog_by_topic()["t.status"]["producers"]
+
+
+def test_seed_agents_have_channels():
+    reg = seed_default_registry(now=BASE)
+    cat = reg.catalog_by_topic()
+    assert "traffic-virtual-001" in cat[c.TrafficTopics.OBSERVATION]["producers"]
+    assert "traffic-system-001" in cat[c.TrafficTopics.STATUS_INTERSECTION]["producers"]
+    assert "traffic-system-001" in cat[c.TrafficTopics.OBSERVATION]["consumers"]

@@ -17,8 +17,10 @@ from pydantic import ValidationError
 from ..contracts import (
     AgentHeartbeatPayload,
     AgentLifecyclePayload,
+    Channel,
     Envelope,
     EventType,
+    parse_iso,
     parse_payload,
 )
 from .constants import DEFAULT_AGENTS
@@ -55,9 +57,16 @@ class Registry:
         agent_type: str,
         capabilities: list[str] | None = None,
         command_types: list[str] | None = None,
+        produces: list[Channel] | None = None,
+        consumes: list[Channel] | None = None,
+        weight: float | None = None,
         now: datetime | None = None,
     ) -> AgentRecord:
-        """注册或更新一个智能体（幂等：重复注册刷新能力/命令类型，保留心跳）。"""
+        """注册或更新一个智能体（幂等：重复注册刷新能力/命令类型/通道，保留心跳）。
+
+        通道（produces/consumes）与 weight 未传（None）时保留已有值，容忍只刷新
+        部分字段的重复注册。
+        """
 
         ts = now or _utcnow()
         with self._lock:
@@ -67,6 +76,9 @@ class Registry:
                 agent_type=agent_type,
                 capabilities=list(capabilities or []),
                 command_types=list(command_types or []),
+                produces=list(produces) if produces is not None else (existing.produces if existing else []),
+                consumes=list(consumes) if consumes is not None else (existing.consumes if existing else []),
+                weight=weight if weight is not None else (existing.weight if existing else 1.0),
                 registered_at=existing.registered_at if existing else ts,
                 reported_status=existing.reported_status if existing else None,
                 last_heartbeat_ts=existing.last_heartbeat_ts if existing else None,
@@ -120,13 +132,21 @@ class Registry:
         except ValidationError:
             return False
 
+        # 时间戳取事件时间（emission），而非处理时间：这样 registry 用 earliest 从头
+        # 重放历史心跳重建世界视图时，按真实新鲜度判定，不会把旧心跳误算成「刚在线」。
+        # 测试可注入 now 覆盖。
+        ts = now or parse_iso(env.time.event_ts)
+
         if env.event_type == EventType.AGENT_REGISTERED and isinstance(payload, AgentLifecyclePayload):
             self.register(
                 agent_id=payload.agent_id,
                 agent_type=payload.agent_type,
                 capabilities=payload.capabilities,
                 command_types=payload.command_types,
-                now=now,
+                produces=payload.produces,
+                consumes=payload.consumes,
+                weight=payload.weight,
+                now=ts,
             )
             return True
         if env.event_type == EventType.AGENT_DEREGISTERED and isinstance(payload, AgentLifecyclePayload):
@@ -137,7 +157,7 @@ class Registry:
                 agent_id=env.source.agent_id,
                 status=payload.status,
                 last_error=payload.last_error,
-                now=now,
+                now=ts,
             )
             return True
         return False
@@ -154,6 +174,66 @@ class Registry:
     def __len__(self) -> int:
         with self._lock:
             return len(self._agents)
+
+    # -- 目录 / 发现（catalog 由 produces/consumes 投影，无需单独 topic）------ #
+    def catalog_by_topic(self) -> dict[str, dict]:
+        """按 topic 反查谁产/谁消，含 per-key 细分。
+
+        返回 ``{topic: {"producers": [...], "consumers": [...],
+        "keys": {key: {"producers": [...], "consumers": [...]}}}}``。
+        keys 仅含 agent 显式声明覆盖的实体；通道未声明 keys（整条 topic）不进 keys 细分。
+        """
+
+        with self._lock:
+            records = list(self._agents.values())
+
+        catalog: dict[str, dict] = {}
+
+        def _entry(topic: str) -> dict:
+            return catalog.setdefault(topic, {"producers": [], "consumers": [], "keys": {}})
+
+        def _key_entry(entry: dict, key: str) -> dict:
+            return entry["keys"].setdefault(key, {"producers": [], "consumers": []})
+
+        def _add(agent_id: str, channels: list[Channel], role: str) -> None:
+            for ch in channels:
+                entry = _entry(ch.topic)
+                if agent_id not in entry[role]:
+                    entry[role].append(agent_id)
+                for key in ch.keys:
+                    ke = _key_entry(entry, key)
+                    if agent_id not in ke[role]:
+                        ke[role].append(agent_id)
+
+        for rec in records:
+            _add(rec.agent_id, rec.produces, "producers")
+            _add(rec.agent_id, rec.consumes, "consumers")
+        return catalog
+
+    def agents_covering(self, topic: str, key: str | None = None) -> list[AgentRecord]:
+        """返回在 ``topic`` 上有通道的 agent；给 ``key`` 时只取覆盖该实体的。
+
+        通道未声明 keys（整条 topic）视为覆盖任意 key。
+        """
+
+        with self._lock:
+            records = list(self._agents.values())
+        out: list[AgentRecord] = []
+        for rec in records:
+            for ch in list(rec.produces) + list(rec.consumes):
+                if ch.topic != topic:
+                    continue
+                if key is None or not ch.keys or key in ch.keys:
+                    out.append(rec)
+                    break
+        return out
+
+    def agents_with_capability(self, capability: str) -> list[AgentRecord]:
+        """返回 capabilities 含 ``capability`` 的 agent（model 选成员/发现用）。"""
+
+        with self._lock:
+            records = list(self._agents.values())
+        return [rec for rec in records if capability in rec.capabilities]
 
     # -- 命令目标白名单（docs/gateway-api.md §3、protocol.md §7）----------- #
     def authorize_command(self, agent_id: str, command_type: str) -> CommandAuthz:
@@ -187,6 +267,8 @@ def seed_default_registry(registry: Registry | None = None, *, now: datetime | N
             agent_type=spec["agent_type"],
             capabilities=spec["capabilities"],
             command_types=spec["command_types"],
+            produces=spec.get("produces"),
+            consumes=spec.get("consumes"),
             now=now,
         )
     return reg

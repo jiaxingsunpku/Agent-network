@@ -19,6 +19,9 @@ class Domain(str, Enum):
     TRAFFIC = "traffic"
     #: P7：视频监控 World Model（事件文本问答），见 docs/video.md。
     VIDEO = "video"
+    #: 平台级「世界」命名空间：跨域名册/发现的 meta 平面（lifecycle/heartbeat），
+    #: 不是某个城市问题域——所有域的 agent 都往这里自注册 + 心跳。
+    WORLD = "world"
     # MINE 预留，本期不做（见 docs/naming.md §1）。
 
 
@@ -93,4 +96,23 @@ ALL_VIDEO_TOPICS: tuple[str, ...] = (
     VideoTopics.PERCEPTION_TEXT,
     VideoTopics.COMMAND,
     VideoTopics.DLQ,
+)
+
+
+class WorldTopics:
+    """世界级 meta 平面 topic（跨域名册/发现，docs/naming.md）。
+
+    lifecycle 是统一世界名册（compacted，key=agent_id 留每个 agent 最新一条）；
+    heartbeat 是活性流（短保留）。所有域的 agent 都往这里自注册 + 心跳，
+    registry 读这两条重建世界视图。
+    """
+
+    AGENT_LIFECYCLE = build_topic(Domain.WORLD, Layer.AGENT_LIFECYCLE)  # anp.world.agent.lifecycle.v1
+    AGENT_HEARTBEAT = build_topic(Domain.WORLD, Layer.AGENT_HEARTBEAT)  # anp.world.agent.heartbeat.v1
+
+
+#: 世界级 meta topic（lifecycle compacted、heartbeat 短保留，见 deploy/topics）。
+ALL_WORLD_TOPICS: tuple[str, ...] = (
+    WorldTopics.AGENT_LIFECYCLE,
+    WorldTopics.AGENT_HEARTBEAT,
 )

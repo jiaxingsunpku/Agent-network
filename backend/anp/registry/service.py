@@ -6,9 +6,19 @@
 
 from __future__ import annotations
 
-from ..contracts import TrafficTopics
+from ..contracts import TrafficTopics, WorldTopics
 from ..messaging import make_consumer
 from .registry import Registry
+
+#: registry 订阅的 lifecycle/heartbeat topic —— **双读过渡**：世界级 + 交通级。
+#: 世界级是目标名册；交通级保留，让尚未迁到 WorldClient 的交通体（如 SV 感知/执行体）
+#: 仍可见。各组迁完后从这里撤掉交通级即可。视频域目前无 agent lifecycle 层。
+REGISTRY_TOPICS: list[str] = [
+    WorldTopics.AGENT_LIFECYCLE,
+    WorldTopics.AGENT_HEARTBEAT,
+    TrafficTopics.AGENT_LIFECYCLE,
+    TrafficTopics.AGENT_HEARTBEAT,
+]
 
 
 class RegistryConsumer:
@@ -43,9 +53,9 @@ def build_registry_consumer(
     """构造订阅 lifecycle+heartbeat 的 consumer（live 模式）。返回 ``(svc, consumer)``。"""
 
     consumer = make_consumer(
-        [TrafficTopics.AGENT_LIFECYCLE, TrafficTopics.AGENT_HEARTBEAT],
+        REGISTRY_TOPICS,
         group_id=group_id,
         bootstrap_servers=bootstrap,
-        auto_offset_reset="latest",
+        auto_offset_reset="earliest",  # 从头重建世界名册（compacted lifecycle 代价小）
     )
     return RegistryConsumer(registry), consumer

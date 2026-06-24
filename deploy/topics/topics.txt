@@ -1,5 +1,6 @@
-# ANP 交通域 v1 topic 清单 —— 命名规范见 docs/naming.md，由 deploy/create_topics.sh 读取。
-# 格式：<topic>  <partitions>  <replication_factor>     （# 后为注释，空行忽略）
+# ANP topic 清单 —— 命名规范见 docs/naming.md，由 deploy/create_topics.sh 读取。
+# 格式：<topic>  <partitions>  <replication_factor>  [configs]
+#   configs 可选，形如 cleanup.policy=compact（# 后为注释，空行忽略）。
 # 单节点 Kafka，副本因子一律 1；partition 数预留并行度（按实体 id 分区）。
 #
 # topic                                    partitions  rf
@@ -15,3 +16,6 @@ anp.video.perception.text.v1               6           1
 # 视频域控制层（P8 ANP→vision hub 请求视频推理命令；经 adapters/visionhub 译出）
 anp.video.command.v1                       3           1
 anp.video.dlq.v1                           1           1
+# 世界级 meta 平面（跨域名册/发现）：lifecycle 压实成名册（key=agent_id 留最新），heartbeat 活性流
+anp.world.agent.lifecycle.v1               1           1    cleanup.policy=compact
+anp.world.agent.heartbeat.v1               1           1

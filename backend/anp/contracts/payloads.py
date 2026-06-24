@@ -134,15 +134,34 @@ class AckPayload(_Strict):
 
 
 # --------------------------------------------------------------------------- #
+# 通道：agent 在某 topic 上覆盖哪些实体 key（统一世界自描述用）
+# --------------------------------------------------------------------------- #
+class Channel(_Strict):
+    """agent 的一条「通道」声明：它在某个 ``topic`` 上覆盖哪些实体 ``keys``。
+
+    ``keys`` 为空 = 整条 topic、不分实体；非空 = 只覆盖这些实体（如某路口
+    ``["intersection_1_1"]``）。Kafka 订阅仍是 topic 级，key 只进声明 / catalog /
+    寻址，客户端按 key 过滤留作后续。
+    """
+
+    topic: str = Field(min_length=1)
+    keys: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
 # 生命周期 / 心跳 payload
 # --------------------------------------------------------------------------- #
 class AgentLifecyclePayload(_Strict):
-    """注册/下线（topic anp.traffic.agent.lifecycle.v1，docs/protocol.md §3）。"""
+    """注册/下线（统一世界名册 anp.world.agent.lifecycle.v1，docs/protocol.md §3）。"""
 
     agent_id: str = Field(min_length=1)
-    agent_type: str = Field(min_length=1)  # 如 "virtual"
+    agent_type: str = Field(min_length=1)  # 如 "virtual" / "model"
     capabilities: list[str] = Field(default_factory=list)  # 如 ["perception", "exec"]
     command_types: list[str] = Field(default_factory=list)  # 可接收的命令类型
+    #: 统一世界通道声明（加法、向后兼容：旧消息无此三字段，按默认值 validate）。
+    produces: list[Channel] = Field(default_factory=list)  # 本 agent 产出的通道
+    consumes: list[Channel] = Field(default_factory=list)  # 本 agent 订阅的通道
+    weight: float = Field(default=1.0, ge=0.0)  # 协作权重，先开槽暂不驱动逻辑
 
 
 class AgentHeartbeatPayload(_Strict):

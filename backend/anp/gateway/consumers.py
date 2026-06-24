@@ -23,7 +23,7 @@ from ..contracts import (
     parse_payload,
 )
 from ..messaging import make_consumer
-from ..registry.service import RegistryConsumer
+from ..registry.service import REGISTRY_TOPICS, RegistryConsumer
 from .state import GatewayState
 
 
@@ -116,10 +116,10 @@ class GatewayConsumers:
             auto_offset_reset="latest",
         )
         registry_consumer = make_consumer(
-            [TrafficTopics.AGENT_LIFECYCLE, TrafficTopics.AGENT_HEARTBEAT],
+            REGISTRY_TOPICS,  # 双读：世界级 + 交通级 lifecycle/heartbeat
             group_id="anp-gateway-registry",
             bootstrap_servers=bootstrap,
-            auto_offset_reset="latest",
+            auto_offset_reset="earliest",  # 从头重建世界名册
         )
         self._consumers = [status_consumer, ack_consumer, registry_consumer]
 
