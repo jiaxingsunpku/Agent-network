@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   BarChart3,
@@ -25,7 +25,7 @@ import {
   Zap
 } from "lucide-react";
 import { LargeTrafficMapView } from "./LargeTrafficMapView";
-import { sendAgentNetworkCommand } from "../api/agentNetworkClient";
+import { fetchSvNetwork, sendAgentNetworkCommand, SvNetworkGeometry, SvNetworkJunction } from "../api/agentNetworkClient";
 import { AgentNode, NetworkSnapshot, WorldModelDefinition, WorldModelRuntime } from "../types";
 
 interface Props {
@@ -168,20 +168,86 @@ function nodeCommandTypes(node: AgentNode | undefined): string[] {
   return Array.isArray(raw) ? (raw as string[]) : [];
 }
 
+type SvJunctionStatus = "online" | "warning" | "offline" | "syncing";
+
+interface SvJunctionAgent {
+  id: string;
+  label: string;
+  typeLabel: string;
+  status: SvJunctionStatus;
+  health: number;
+  congestion: number;
+  totalVehicles: number;
+  totalHalting: number;
+  x: number;
+  y: number;
+  raw: SvNetworkJunction;
+}
+
+function junctionTypeLabel(type: string) {
+  if (type === "traffic_light") return "信号灯";
+  if (type === "priority") return "优先通行";
+  if (type === "right_before_left") return "右侧优先";
+  return type || "未知类型";
+}
+
+function svCongestionLabel(value: number) {
+  if (value >= 0.78) return "严重拥堵";
+  if (value >= 0.6) return "拥堵";
+  if (value >= 0.42) return "缓行";
+  if (value >= 0.25) return "基本畅通";
+  return "畅通";
+}
+
+function statusFromSvJunction(junction: SvNetworkJunction): SvJunctionStatus {
+  if (junction.is_active === false) return "offline";
+  if (junction.congestion >= 0.78) return "offline";
+  if (junction.congestion >= 0.6) return "warning";
+  return "online";
+}
+
+function svJunctionHealth(junction: SvNetworkJunction) {
+  if (junction.is_active === false) return 0;
+  return Math.max(0, Math.min(100, Math.round(100 - junction.congestion * 100)));
+}
+
+function svJunctionAgents(svNetwork?: SvNetworkGeometry | null): SvJunctionAgent[] {
+  if (!svNetwork?.junctions?.length) return [];
+  return [...svNetwork.junctions]
+    .sort((a, b) => a.id.localeCompare(b.id, "zh-CN", { numeric: true }))
+    .map((junction) => ({
+      id: junction.id,
+      label: `Junction ${junction.id}`,
+      typeLabel: junctionTypeLabel(junction.junction_type),
+      status: statusFromSvJunction(junction),
+      health: svJunctionHealth(junction),
+      congestion: junction.congestion,
+      totalVehicles: junction.total_vehicles,
+      totalHalting: junction.total_halting,
+      x: junction.x,
+      y: junction.y,
+      raw: junction
+    }));
+}
+
+function svNetworkLabel(svNetwork?: SvNetworkGeometry | null) {
+  if (!svNetwork?.junctions?.length) return "SV 路网未连接";
+  return `当前 SV 路网 · ${svNetwork.junctions.length} 路口 / ${svNetwork.edges.length} 道路边`;
+}
+
 // 控制策略 = 真·control_signal_inference：选算法 + 启停 → 网关 /commands → SV /api/simulation/start|stop（真驱动 SUMO）。
-function ControlInferencePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
+function ControlInferencePanel({ snapshot, svNetwork }: { snapshot: NetworkSnapshot; svNetwork?: SvNetworkGeometry | null }) {
   const ALGORITHMS = ["maxpressure", "colight", "fixedtime", "ppo"];
   const exec = snapshot.nodes.find((n) => nodeCommandTypes(n).includes("control_signal_inference"));
-  const regions = snapshot.nodes.filter((n) => n.nodeType === "region");
+  const junctions = svJunctionAgents(svNetwork);
+  const signalJunctions = junctions.filter((j) => j.raw.junction_type === "traffic_light").length;
+  const avgCongestion = junctions.length
+    ? junctions.reduce((sum, item) => sum + item.congestion, 0) / junctions.length
+    : 0;
   const [algorithm, setAlgorithm] = useState("maxpressure");
-  const [objectId, setObjectId] = useState(regions[0]?.id ?? "gg-xiongchu-minzu");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<string[]>([`控制策略面板就绪 · ${nowLabel()}`]);
-
-  useEffect(() => {
-    if (!regions.some((r) => r.id === objectId) && regions[0]) setObjectId(regions[0].id);
-  }, [regions, objectId]);
 
   const dispatch = async (action: "start" | "stop") => {
     if (!exec) {
@@ -194,11 +260,10 @@ function ControlInferencePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
       const resp = await sendAgentNetworkCommand({
         target_agent_id: exec.id,
         command_type: "control_signal_inference",
-        object_id: objectId,
         payload,
         expires_in_sec: 60
       });
-      const msg = `已下发 ${action}${action === "start" ? `/${algorithm}` : ""} → ${resp.status} · cmd ${resp.command_id.slice(0, 8)} · ${nowLabel()}`;
+      const msg = `已下发全局 ${action}${action === "start" ? `/${algorithm}` : ""} → ${resp.status} · cmd ${resp.command_id.slice(0, 8)} · ${nowLabel()}`;
       setNotice(msg);
       setLogs((items) => [msg, ...items]);
     } catch (error) {
@@ -215,19 +280,25 @@ function ControlInferencePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
       <div>
         <div className="tool-shell-header">
           <Cpu size={22} />
-          <div><h2>控制策略</h2><p>选择信号控制算法并启停推理（真·control_signal_inference → SignalVision，驱动 SUMO）。</p></div>
+          <div><h2>控制策略</h2><p>选择全局信号控制算法并启停当前 SV 路网仿真（control_signal_inference → SignalVision /simulation）。</p></div>
         </div>
         <FeedbackBar message={notice} />
+        <div className="shell-stat-grid compact">
+          <StatCard label="作用范围" value={junctions.length ? `${junctions.length} 路口` : "SV 未连接"} />
+          <StatCard label="信号灯" value={signalJunctions} />
+          <StatCard label="道路边" value={svNetwork?.edges.length ?? 0} />
+          <StatCard label="平均拥堵" value={`${Math.round(avgCongestion * 100)}%`} />
+        </div>
         <Section title="执行体">
           <div className="tool-list-row">
             <span className="row-main"><b>{exec?.label ?? "traffic-exec-sv-001"}</b><small>{exec ? `${exec.id} · ${nodeCommandTypes(exec).join(" / ")}` : "未发现 control_signal_inference 执行体"}</small></span>
             <StatusPill tone={exec?.status === "online" ? "green" : "amber"}>{exec?.status ?? "offline"}</StatusPill>
           </div>
         </Section>
-        <Section title="控制配置">
+        <Section title="全局控制配置">
           <div className="tool-config-grid">
             <label><span>控制算法</span><select value={algorithm} onChange={(event) => setAlgorithm(event.target.value)}>{ALGORITHMS.map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
-            <label><span>目标路口</span><select value={objectId} onChange={(event) => setObjectId(event.target.value)}>{(regions.length ? regions.map((r) => ({ id: r.id, label: r.label })) : [{ id: objectId, label: objectId }]).map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label>
+            <label><span>作用对象</span><input value={svNetworkLabel(svNetwork)} readOnly /></label>
           </div>
         </Section>
         <div className="tool-action-row">
@@ -237,68 +308,58 @@ function ControlInferencePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
       </div>
       <div className="tool-side-card">
         <h3>{algorithm}</h3>
-        <FieldGrid items={[["命令", "control_signal_inference"], ["执行体", exec?.id ?? "—"], ["目标路口", objectId], ["执行体状态", exec?.status ?? "offline"]]} />
-        <p className="muted-text">网关返回「published」即命令已入 Kafka；ack（completed/rejected）由执行体异步回执，可在 Inspector / 事件流观察。</p>
+        <FieldGrid items={[["命令", "control_signal_inference"], ["执行体", exec?.id ?? "—"], ["范围", svNetworkLabel(svNetwork)], ["执行体状态", exec?.status ?? "offline"]]} />
+        <p className="muted-text">该命令与 SV 一致：算法/仿真是全局路网级配置，不绑定单个路口；网关返回「published」表示命令已入 Kafka，ack 在 Inspector / 事件流观察。</p>
         <ActionLog entries={logs} />
       </div>
     </div>
   );
 }
 
-// 智能体列表：节点身份/状态/健康/分组取自真实 snapshot；「下发相位方案」走真·set_signal_plan 命令闭环。
-function AgentsPanel({ snapshot }: { snapshot: NetworkSnapshot }) {
-  const agents = snapshot.nodes;
-  const regionId = snapshot.nodes.find((n) => n.nodeType === "region")?.id ?? "gg-xiongchu-minzu";
-  // 默认选中可下发命令的执行体，便于直接看到真实命令按钮可用。
-  const [selectedId, setSelectedId] = useState(
-    () => agents.find((n) => nodeCommandTypes(n).includes("set_signal_plan"))?.id ?? agents[0]?.id ?? ""
-  );
-  const selected = agents.find((node) => node.id === selectedId) ?? agents[0];
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [logs, setLogs] = useState<string[]>([`协作网络刷新 · ${nowLabel()}`]);
+// 智能体列表：镜像 SV agents-tool，用当前 `/sv-network` 的 JunctionAgent 摘要渲染；
+// ANP registry 只作为接入链路展示，不把静态 snapshot 拓扑冒充 SV 路口智能体。
+function AgentsPanel({ snapshot, svNetwork }: { snapshot: NetworkSnapshot; svNetwork?: SvNetworkGeometry | null }) {
+  const agents = svJunctionAgents(svNetwork);
+  const anpNodes = snapshot.nodes.filter((node) => node.nodeType === "agent" || node.nodeType === "service");
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [selectedId, setSelectedId] = useState(() => agents[0]?.id ?? "");
+  const [logs, setLogs] = useState<string[]>([`SV Junction Agents 刷新 · ${nowLabel()}`]);
 
   useEffect(() => {
-    if (!selectedId && agents[0]) setSelectedId(agents[0].id);
+    if (!agents.length) {
+      setSelectedId("");
+      return;
+    }
+    if (!agents.some((agent) => agent.id === selectedId)) setSelectedId(agents[0].id);
   }, [agents, selectedId]);
 
-  const canSignalPlan = nodeCommandTypes(selected).includes("set_signal_plan");
-  // 详情按节点类型给真实字段：路口(region) 看 World Status；智能体(agent) 看 registry。
-  const detailItems: Array<[string, string]> = selected?.nodeType === "region"
-    ? [
-        ["状态", selected.status],
-        ["拥堵", String(selected.metrics?.state ?? "—")],
-        ["当前延误", selected.metrics?.delaySec != null ? `${Number(selected.metrics.delaySec)}s` : "—"],
-        ["排队", selected.metrics?.queueM != null ? `${Number(selected.metrics.queueM)}m` : "—"]
-      ]
-    : [
-        ["健康度", String(selected?.health ?? 0)],
-        ["状态", selected?.status ?? "-"],
-        ["类型", String(selected?.metrics?.agentType ?? selected?.nodeType ?? "-")],
-        ["可下发命令", nodeCommandTypes(selected).join(", ") || "—"]
-      ];
+  const filteredAgents = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return agents.filter((agent) => {
+      const matchQuery = !q || `${agent.id} ${agent.typeLabel}`.toLowerCase().includes(q);
+      const matchType = !typeFilter || agent.raw.junction_type === typeFilter;
+      return matchQuery && matchType;
+    });
+  }, [agents, query, typeFilter]);
 
-  const dispatchSignalPlan = async () => {
-    if (!selected || !canSignalPlan) return;
-    setBusy(true);
-    try {
-      const resp = await sendAgentNetworkCommand({
-        target_agent_id: selected.id,
-        command_type: "set_signal_plan",
-        object_id: regionId,
-        payload: { desired_phase: "north_south_green", duration_s: 25 },
-        expires_in_sec: 60
-      });
-      const msg = `已下发 set_signal_plan@${regionId} → ${resp.status} · cmd ${resp.command_id.slice(0, 8)} · ${nowLabel()}`;
-      setNotice(msg);
-      setLogs((items) => [msg, ...items]);
-    } catch (error) {
-      const msg = `下发失败：${error instanceof Error ? error.message : String(error)} · ${nowLabel()}`;
-      setNotice(msg);
-      setLogs((items) => [msg, ...items]);
-    } finally {
-      setBusy(false);
-    }
+  const selected = agents.find((node) => node.id === selectedId) ?? filteredAgents[0] ?? agents[0];
+  const detailItems: Array<[string, string]> = selected
+    ? [
+        ["SV junction_id", selected.id],
+        ["类型", selected.typeLabel],
+        ["状态", selected.raw.is_active === false ? "未激活" : "活跃"],
+        ["健康度", String(selected.health)],
+        ["当前车辆", String(selected.totalVehicles)],
+        ["停车车辆", String(selected.totalHalting)],
+        ["拥堵", `${Math.round(selected.congestion * 100)}%`],
+        ["位置", `${selected.x.toFixed(1)}, ${selected.y.toFixed(1)}`]
+      ]
+    : [["状态", "等待 SV /sv-network"]];
+
+  const selectAgent = (agent: SvJunctionAgent) => {
+    setSelectedId(agent.id);
+    setLogs((items) => [`选中 SV 路口智能体 ${agent.id} · ${nowLabel()}`, ...items]);
   };
 
   return (
@@ -306,67 +367,89 @@ function AgentsPanel({ snapshot }: { snapshot: NetworkSnapshot }) {
       <div>
         <div className="tool-shell-header">
           <RadioTower size={22} />
-          <div><h2>智能体列表</h2><p>真实 registry / World Status：路口智能体、控制/感知执行体与网关（snapshot 实时）。</p></div>
+          <div><h2>智能体列表</h2><p>SV 当前地图 Junction Agents：来自 /sv-network（SV /junctions/summary），与交通地图同源。</p></div>
         </div>
-        <FeedbackBar message={notice} />
+        <div className="shell-stat-grid compact">
+          <StatCard label="当前地图" value={agents.length ? `${agents.length} 路口` : "未连接"} />
+          <StatCard label="道路边" value={svNetwork?.edges.length ?? 0} />
+          <StatCard label="信号灯" value={agents.filter((a) => a.raw.junction_type === "traffic_light").length} />
+          <StatCard label="ANP 节点" value={anpNodes.length} />
+        </div>
+        <div className="tool-config-grid">
+          <label><span>搜索智能体</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入 SV junction_id" /></label>
+          <label><span>路口类型</span><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="">全部类型</option><option value="traffic_light">信号灯</option><option value="priority">优先通行</option><option value="right_before_left">右侧优先</option></select></label>
+        </div>
         <div className="agent-shell-grid">
-          {agents.map((node) => (
-            <button type="button" className={selected?.id === node.id ? "selected" : ""} key={node.id} onClick={() => setSelectedId(node.id)}>
-              <i className={`status-dot ${node.status}`} />
-              <b>{node.label}</b>
-              <span>{node.group} · health {node.health}</span>
+          {filteredAgents.length === 0 ? (
+            <div className="muted-text">没有符合条件的 SV 路口智能体</div>
+          ) : filteredAgents.map((agent) => (
+            <button type="button" className={selected?.id === agent.id ? "selected" : ""} key={agent.id} onClick={() => selectAgent(agent)}>
+              <i className={`status-dot ${agent.status}`} />
+              <b>{agent.label}</b>
+              <span>{agent.typeLabel} · 车辆 {agent.totalVehicles} · 拥堵 {Math.round(agent.congestion * 100)}%</span>
             </button>
           ))}
         </div>
+        <Section title="ANP 接入节点">
+          <div className="tool-compact-list">
+            {anpNodes.map((node) => (
+              <div className="tool-list-row" key={node.id}>
+                <span className="row-main"><b>{node.label}</b><small>{node.nodeType} · {nodeCommandTypes(node).join(" / ") || String(node.metrics?.agentType ?? node.metrics?.role ?? "read-only")}</small></span>
+                <StatusPill tone={node.status === "online" ? "green" : node.status === "warning" ? "amber" : "slate"}>{node.status}</StatusPill>
+              </div>
+            ))}
+          </div>
+        </Section>
       </div>
       <div className="tool-side-card">
-        <h3>{selected?.label ?? "路口智能体"}</h3>
+        <h3>{selected?.label ?? "SV 路口智能体"}</h3>
         <FieldGrid items={detailItems} />
-        <div className="tool-action-row vertical">
-          <ActionButton icon={Zap} variant="primary" onClick={dispatchSignalPlan}>
-            {busy ? "下发中…" : canSignalPlan ? "下发相位方案" : "该节点不可下发命令"}
-          </ActionButton>
-        </div>
-        <p className="muted-text">「下发相位方案」对可下发命令的执行体发真实 set_signal_plan（→网关 /commands→ack）；其余节点为只读监控。</p>
+        <p className="muted-text">SV 的 JunctionAgent 数量随当前地图变化；这里不使用网关静态拓扑，也不把全局算法控制绑定到单个路口。</p>
         <ActionLog entries={logs} />
       </div>
     </div>
   );
 }
 
-// 实时交通数据：取自真实 snapshot 各路口 World Status 聚合（冷路径 timeseries 在 v1 未启用，
-// 故曲线由前端对真实 snapshot 采样滚动累积，而非 TimescaleDB 历史）。
-function RealtimePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
+// 实时交通数据：优先取 SV 当前地图 JunctionAgent 摘要；SV 不可达时回落 snapshot World Status。
+function RealtimePanel({ snapshot, svNetwork }: { snapshot: NetworkSnapshot; svNetwork?: SvNetworkGeometry | null }) {
   const agg = useMemo(() => {
+    const junctions = svJunctionAgents(svNetwork);
+    if (junctions.length) {
+      const vehicles = junctions.reduce((sum, item) => sum + item.totalVehicles, 0);
+      const halting = junctions.reduce((sum, item) => sum + item.totalHalting, 0);
+      const congestion = junctions.reduce((sum, item) => sum + item.congestion, 0) / junctions.length;
+      const active = junctions.filter((item) => item.raw.is_active !== false).length;
+      return { vehicles, halting, congestion, active, source: "sv" as const };
+    }
     const regions = snapshot.nodes.filter((n) => n.nodeType === "region");
-    const flow = regions.reduce((s, n) => s + Number(n.metrics?.flow ?? 0), 0);
-    const speeds = regions.map((n) => Number(n.metrics?.speedKmh ?? 0)).filter((v) => v > 0);
-    const speed = speeds.length ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
-    const delays = regions.map((n) => Number(n.metrics?.delaySec ?? 0));
-    const delay = delays.length ? delays.reduce((a, b) => a + b, 0) / delays.length : 0;
-    const queue = regions.reduce((m, n) => Math.max(m, Number(n.metrics?.queueM ?? 0)), 0);
-    return { flow, speed, delay, queue };
-  }, [snapshot.nodes]);
+    const vehicles = regions.reduce((s, n) => s + Number(n.metrics?.flow ?? 0), 0);
+    const halting = regions.reduce((m, n) => Math.max(m, Number(n.metrics?.queueM ?? 0)), 0);
+    const congestion = regions.length
+      ? regions.reduce((s, n) => s + Number(n.metrics?.congestionIndex ?? 0), 0) / regions.length
+      : 0;
+    return { vehicles, halting, congestion, active: regions.length, source: "snapshot" as const };
+  }, [snapshot.nodes, svNetwork]);
 
-  const [metric, setMetric] = useState<"flow" | "speed" | "delay" | "queue">("flow");
-  const [history, setHistory] = useState<Record<string, number[]>>({ flow: [], speed: [], delay: [], queue: [] });
+  const [metric, setMetric] = useState<"vehicles" | "halting" | "congestion" | "active">("vehicles");
+  const [history, setHistory] = useState<Record<string, number[]>>({ vehicles: [], halting: [], congestion: [], active: [] });
 
-  // 每次真实 snapshot 刷新（聚合值变化）追加一个采样点，前端滚动出实时曲线。
+  // 每次真实 SV/snapshot 刷新（聚合值变化）追加一个采样点，前端滚动出实时曲线。
   useEffect(() => {
     const push = (arr: number[], v: number) => [...arr, v].slice(-40);
     setHistory((prev) => ({
-      flow: push(prev.flow, agg.flow),
-      speed: push(prev.speed, agg.speed),
-      delay: push(prev.delay, agg.delay),
-      queue: push(prev.queue, agg.queue)
+      vehicles: push(prev.vehicles, agg.vehicles),
+      halting: push(prev.halting, agg.halting),
+      congestion: push(prev.congestion, agg.congestion * 100),
+      active: push(prev.active, agg.active)
     }));
-  }, [agg.flow, agg.speed, agg.delay, agg.queue]);
+  }, [agg.vehicles, agg.halting, agg.congestion, agg.active]);
 
   const metrics = [
-    { id: "flow", label: "流量", value: formatNumber(Math.round(agg.flow)) },
-    { id: "speed", label: "均速", value: `${agg.speed.toFixed(1)} km/h` },
-    { id: "delay", label: "延误", value: `${agg.delay.toFixed(1)} s` },
-    { id: "queue", label: "排队", value: `${agg.queue.toFixed(0)} m` }
+    { id: "vehicles", label: agg.source === "sv" ? "当前车辆" : "流量", value: formatNumber(Math.round(agg.vehicles)) },
+    { id: "halting", label: agg.source === "sv" ? "停车车辆" : "排队", value: formatNumber(Math.round(agg.halting)) },
+    { id: "congestion", label: "平均拥堵", value: `${Math.round(agg.congestion * 100)}%` },
+    { id: "active", label: agg.source === "sv" ? "活跃路口" : "路口数", value: formatNumber(agg.active) }
   ];
   const series = history[metric] ?? [];
   const peak = Math.max(1, ...series);
@@ -375,7 +458,7 @@ function RealtimePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
     <div className="tool-shell-panel">
       <div className="tool-shell-header">
         <LineChart size={22} />
-        <div><h2>实时交通数据</h2><p>真实 World Status 聚合（snapshot 实时）：流量/均速/延误/排队。</p></div>
+        <div><h2>实时交通数据</h2><p>{agg.source === "sv" ? "SV 当前地图实时摘要：车辆/停车/拥堵/活跃路口。" : "SV 不可达，回落 World Status snapshot 聚合。"}</p></div>
       </div>
       <div className="shell-stat-grid">
         {metrics.map((item) => <StatCard key={item.id} label={item.label} value={item.value} />)}
@@ -388,7 +471,7 @@ function RealtimePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
           ? <span className="muted-text">等待 snapshot 采样…</span>
           : series.map((value, index) => <i key={`${index}-${value}`} style={{ height: `${Math.round((value / peak) * 100)}%` }} />)}
       </div>
-      <p className="muted-text">曲线＝前端对真实 snapshot 采样滚动累积（每 ~3s 一点）；冷路径 timeseries 在 v1 未启用，无 TimescaleDB 历史。</p>
+      <p className="muted-text">曲线＝前端对真实 SV/snapshot 采样滚动累积（每 ~3s 一点）；冷路径 timeseries 在 v1 未启用，无 TimescaleDB 历史。</p>
       <Section title="运行事件（真实 snapshot.events）">
         <div className="live-event-list">
           {snapshot.events.length === 0
@@ -400,21 +483,39 @@ function RealtimePanel({ snapshot }: { snapshot: NetworkSnapshot }) {
   );
 }
 
-// 路口指标：取自真实 snapshot region 节点的 World Status（flow/speed/delay/queue/拥堵）。
-function MetricsPanel({ snapshot }: { snapshot: NetworkSnapshot }) {
-  const rows = useMemo(() => snapshot.nodes
-    .filter((n) => n.nodeType === "region")
-    .map((n) => ({
-      id: n.id,
-      label: n.label,
-      status: n.status,
-      flow: Number(n.metrics?.flow ?? 0),
-      speedKmh: Number(n.metrics?.speedKmh ?? 0),
-      delaySec: Number(n.metrics?.delaySec ?? 0),
-      queueM: Number(n.metrics?.queueM ?? 0),
-      state: String(n.metrics?.state ?? "—"),
-      congestionIndex: Number(n.metrics?.congestionIndex ?? 0)
-    })), [snapshot.nodes]);
+// 路口指标：优先取 SV 当前地图 JunctionAgent 摘要；SV 不可达时回落 snapshot region 节点。
+function MetricsPanel({ snapshot, svNetwork }: { snapshot: NetworkSnapshot; svNetwork?: SvNetworkGeometry | null }) {
+  const rows = useMemo(() => {
+    const svRows = svJunctionAgents(svNetwork);
+    if (svRows.length) {
+      return svRows.map((j) => ({
+        id: j.id,
+        label: j.label,
+        status: j.status,
+        type: j.typeLabel,
+        vehicles: j.totalVehicles,
+        halting: j.totalHalting,
+        congestionIndex: j.congestion,
+        state: svCongestionLabel(j.congestion),
+        source: "sv" as const,
+        position: `${j.x.toFixed(1)}, ${j.y.toFixed(1)}`
+      }));
+    }
+    return snapshot.nodes
+      .filter((n) => n.nodeType === "region")
+      .map((n) => ({
+        id: n.id,
+        label: n.label,
+        status: n.status,
+        type: "World Status",
+        vehicles: Number(n.metrics?.flow ?? 0),
+        halting: Number(n.metrics?.queueM ?? 0),
+        congestionIndex: Number(n.metrics?.congestionIndex ?? 0),
+        state: String(n.metrics?.state ?? "—"),
+        source: "snapshot" as const,
+        position: `${n.position.x.toFixed(1)}, ${n.position.y.toFixed(1)}`
+      }));
+  }, [snapshot.nodes, svNetwork]);
   const [selectedId, setSelectedId] = useState(rows[0]?.id ?? "");
   const [notice, setNotice] = useState("");
   const [logs, setLogs] = useState<string[]>([`指标画像刷新 · ${nowLabel()}`]);
@@ -435,7 +536,7 @@ function MetricsPanel({ snapshot }: { snapshot: NetworkSnapshot }) {
       <div>
         <div className="tool-shell-header">
           <BarChart3 size={22} />
-          <div><h2>路口指标</h2><p>真实 World Status：各路口流量/速度/延误/排队/拥堵（snapshot 实时）。</p></div>
+          <div><h2>路口指标</h2><p>{rows[0]?.source === "sv" ? "SV 当前地图 JunctionAgent 摘要：车辆/停车/拥堵/类型。" : "SV 不可达，回落 World Status snapshot。"}</p></div>
         </div>
         <FeedbackBar message={notice} />
         <div className="metric-table-shell interactive-table">
@@ -443,19 +544,19 @@ function MetricsPanel({ snapshot }: { snapshot: NetworkSnapshot }) {
             ? <div className="muted-text">暂无路口（snapshot 无 region 节点）</div>
             : rows.map((item) => (
               <button type="button" className={selected?.id === item.id ? "selected" : ""} key={item.id} onClick={() => setSelectedId(item.id)}>
-                <b>{item.label}</b><span>流量 {formatNumber(item.flow)}</span><span>速度 {item.speedKmh}</span><span>延误 {item.delaySec}</span><span>{item.state || item.status}</span>
+                <b>{item.label}</b><span>{item.source === "sv" ? "车辆" : "流量"} {formatNumber(item.vehicles)}</span><span>停车 {formatNumber(item.halting)}</span><span>拥堵 {Math.round(item.congestionIndex * 100)}%</span><span>{item.state || item.status}</span>
               </button>
             ))}
         </div>
       </div>
       <div className="tool-side-card">
         <h3>{selected?.label ?? "路口指标"}</h3>
-        <FieldGrid items={[["流量", formatNumber(selected?.flow ?? 0)], ["速度", `${selected?.speedKmh ?? 0} km/h`], ["延误", `${selected?.delaySec ?? 0}s`], ["排队", `${selected?.queueM ?? 0}m`], ["拥堵", selected?.state || "—"], ["拥堵指数", `${Math.round((selected?.congestionIndex ?? 0) * 100)}%`]]} />
+        <FieldGrid items={[["来源", selected?.source === "sv" ? "SignalVision" : "World Status"], ["类型", selected?.type ?? "—"], [selected?.source === "sv" ? "当前车辆" : "流量", formatNumber(selected?.vehicles ?? 0)], ["停车/排队", formatNumber(selected?.halting ?? 0)], ["拥堵", selected?.state || "—"], ["拥堵指数", `${Math.round((selected?.congestionIndex ?? 0) * 100)}%`], ["位置", selected?.position ?? "—"]]} />
         <div className="tool-action-row vertical">
           <ActionButton icon={ShieldCheck} variant="primary" onClick={() => runAction("标记重点路口")}>标记重点路口</ActionButton>
           <ActionButton icon={FileText} onClick={() => runAction("生成路口画像")}>生成路口画像</ActionButton>
         </div>
-        <p className="muted-text">指标为真实 World Status；标记/画像为本地监控辅助（无下行命令）。</p>
+        <p className="muted-text">指标优先来自 SV 当前地图；标记/画像为本地监控辅助（无下行命令）。</p>
         <ActionLog entries={logs} />
       </div>
     </div>
@@ -510,12 +611,18 @@ function VideoOpsPanel({ tool, runtime }: { tool: ToolDef; runtime: WorldModelRu
   );
 }
 
-function renderTool(tool: ToolDef, snapshot: NetworkSnapshot, runtime: WorldModelRuntime) {
-  if (tool.kind === "map") return <LargeTrafficMapView search="" runtime={runtime} snapshot={snapshot} />;
-  if (tool.kind === "models") return <ControlInferencePanel snapshot={snapshot} />;
-  if (tool.kind === "agents") return <AgentsPanel snapshot={snapshot} />;
-  if (tool.kind === "realtime") return <RealtimePanel snapshot={snapshot} />;
-  if (tool.kind === "metrics") return <MetricsPanel snapshot={snapshot} />;
+function renderTool(
+  tool: ToolDef,
+  snapshot: NetworkSnapshot,
+  runtime: WorldModelRuntime,
+  svNetwork: SvNetworkGeometry | null,
+  onSvNetworkChange: (geo: SvNetworkGeometry | null) => void
+) {
+  if (tool.kind === "map") return <LargeTrafficMapView search="" runtime={runtime} snapshot={snapshot} svNetwork={svNetwork} onSvNetworkChange={onSvNetworkChange} />;
+  if (tool.kind === "models") return <ControlInferencePanel snapshot={snapshot} svNetwork={svNetwork} />;
+  if (tool.kind === "agents") return <AgentsPanel snapshot={snapshot} svNetwork={svNetwork} />;
+  if (tool.kind === "realtime") return <RealtimePanel snapshot={snapshot} svNetwork={svNetwork} />;
+  if (tool.kind === "metrics") return <MetricsPanel snapshot={snapshot} svNetwork={svNetwork} />;
   if (tool.kind === "video" || tool.kind === "detect" || tool.kind === "empty") return <VideoOpsPanel tool={tool} runtime={runtime} />;
   return <VideoOpsPanel tool={tool} runtime={runtime} />;
 }
@@ -523,11 +630,28 @@ function renderTool(tool: ToolDef, snapshot: NetworkSnapshot, runtime: WorldMode
 export function ToolWorkspace({ model, snapshot, runtime, tools, activeToolId }: Props) {
   const availableTools = useMemo(() => (tools.length > 0 ? tools : getToolsForModel(model)), [model, tools]);
   const activeTool = availableTools.find((tool) => tool.id === activeToolId) ?? availableTools[0];
+  const [svNetwork, setSvNetwork] = useState<SvNetworkGeometry | null>(null);
+  const onSvNetworkChange = useCallback((geo: SvNetworkGeometry | null) => setSvNetwork(geo), []);
+
+  useEffect(() => {
+    if (model.id === "wm-video-stream") return undefined;
+    let cancelled = false;
+    const load = async () => {
+      const geo = await fetchSvNetwork();
+      if (!cancelled) setSvNetwork(geo);
+    };
+    load();
+    const id = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [model.id]);
 
   return (
     <section className="tool-workspace">
       <div className={activeTool?.kind === "map" ? "tool-detail map-detail" : "tool-detail"}>
-        {activeTool ? renderTool(activeTool, snapshot, runtime) : null}
+        {activeTool ? renderTool(activeTool, snapshot, runtime, svNetwork, onSvNetworkChange) : null}
       </div>
     </section>
   );

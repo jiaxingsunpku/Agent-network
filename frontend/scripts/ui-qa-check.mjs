@@ -70,15 +70,23 @@ async function runDesktopInteractions(page, results) {
   await runCheck("控制策略·真控制推理下发", async () => {
     // 真·control_signal_inference：点「开始推理」→ 网关 /commands（真实下发，出现反馈：已下发或下发失败）。
     await selectTool(page, "控制策略");
+    if ((await page.getByText("目标路口").count()) !== 0) throw new Error("control_signal_inference should not expose per-junction target");
+    await page.getByText("作用对象").waitFor();
     await page.getByRole("button", { name: /开始推理/ }).click();
     await page.locator('.tool-feedback:has-text("下发")').waitFor();
   }, results);
 
-  await runCheck("智能体列表·真 set_signal_plan 下发", async () => {
-    // 默认选中可下发命令的执行体，点「下发相位方案」→ 真实 set_signal_plan 命令闭环（出现「已下发」反馈）。
+  await runCheck("智能体列表·来自 SV 当前地图", async () => {
+    // 智能体列表应镜像 SV agents-tool：显示当前地图 Junction Agents，而不是网关静态 gg-* 拓扑。
     await selectTool(page, "智能体列表");
-    await page.getByRole("button", { name: /下发相位方案/ }).click();
-    await page.locator('.tool-feedback:has-text("下发")').waitFor();
+    await page.getByText("SV 当前地图 Junction Agents").waitFor();
+    const cards = page.locator(".agent-shell-grid button");
+    await cards.first().waitFor({ timeout: 10000 });
+    const firstCard = await cards.first().innerText();
+    if (!firstCard.includes("Junction")) throw new Error(`agent list is not SV junction list: ${firstCard}`);
+    if ((await page.getByRole("button", { name: /下发相位方案/ }).count()) !== 0) {
+      throw new Error("agent list should not expose per-junction set_signal_plan action");
+    }
   }, results);
 
   await runCheck("交通地图·切换路网下拉（真 set_signal_map 切图 + 几何变更）", async () => {

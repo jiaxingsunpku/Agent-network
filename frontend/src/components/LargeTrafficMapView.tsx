@@ -80,6 +80,8 @@ interface Props {
   search: string;
   runtime?: WorldModelRuntime;
   snapshot?: NetworkSnapshot;
+  svNetwork?: SvNetworkGeometry | null;
+  onSvNetworkChange?: (geo: SvNetworkGeometry | null) => void;
 }
 
 const MAP_URL = "/large-traffic-map.json";
@@ -155,7 +157,7 @@ function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: n
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-export function LargeTrafficMapView({ search, runtime, snapshot }: Props) {
+export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSvNetworkChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const camera = useRef<CameraState>({ x: 0, y: 0, scale: 0.08 });
   const drag = useRef({ active: false, lastX: 0, lastY: 0, moved: false });
@@ -183,8 +185,9 @@ export function LargeTrafficMapView({ search, runtime, snapshot }: Props) {
     const geo = await fetchSvNetwork();
     if (!geo) return null;
     if (mounted.current) setData(svGeometryToMapData(geo));
+    onSvNetworkChange?.(geo);
     return geo.junctions.length;
-  }, []);
+  }, [onSvNetworkChange]);
 
   useEffect(() => {
     mounted.current = true;
@@ -201,6 +204,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot }: Props) {
       if (cancelled) return;
       if (geo) {
         setData(svGeometryToMapData(geo));
+        onSvNetworkChange?.(geo);
         return;
       }
       try {
@@ -216,7 +220,13 @@ export function LargeTrafficMapView({ search, runtime, snapshot }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onSvNetworkChange]);
+
+  useEffect(() => {
+    if (!svNetwork) return;
+    setData(svGeometryToMapData(svNetwork));
+    setError("");
+  }, [svNetwork]);
 
   // 拉取 SV 可用地图列表（切图下拉）；不可达返回 []（不显示下拉）。
   useEffect(() => {

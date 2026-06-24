@@ -16,7 +16,7 @@ NETWORK = {
 }
 SUMMARY = {
     "summaries": [
-        {"junction_id": "1", "position": [30.0, 40.0], "congestion_level": 0.7, "junction_type": "traffic_light", "total_vehicles": 5, "total_halting": 2},
+        {"junction_id": "1", "position": [30.0, 40.0], "congestion_level": 0.7, "junction_type": "traffic_light", "is_active": False, "total_vehicles": 5, "total_halting": 2},
         {"junction_id": "2", "position": None},  # 无坐标 → 跳过
     ]
 }
@@ -32,7 +32,7 @@ def test_build_geometry_maps_edges_and_junctions():
     assert e2["lanes"] == 1  # 无 nlanes → 用 lanes 列表长度
     assert len(geo["junctions"]) == 1  # junction 2 无坐标被跳过
     j = geo["junctions"][0]
-    assert j["id"] == "1" and j["congestion"] == 0.7 and j["total_vehicles"] == 5
+    assert j["id"] == "1" and j["congestion"] == 0.7 and j["is_active"] is False and j["total_vehicles"] == 5
     assert geo["junction_count"] == 9
 
 

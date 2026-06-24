@@ -2432,6 +2432,11 @@ button {
   margin-bottom: 18px;
 }
 
+.shell-stat-grid.compact {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
 .shell-stat-card {
   border: 1px solid #e0e8f1;
   border-radius: 8px;
@@ -2592,6 +2597,10 @@ button {
   font: inherit;
 }
 
+.tool-config-grid + .agent-shell-grid {
+  margin-top: 14px;
+}
+
 .tool-action-row {
   display: flex;
   flex-wrap: wrap;
@@ -2707,6 +2716,15 @@ button {
   display: grid;
   gap: 8px;
   margin-top: 14px;
+}
+
+.tool-compact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tool-compact-list .tool-list-row {
+  margin-bottom: 0;
 }
 
 .tool-log-row {

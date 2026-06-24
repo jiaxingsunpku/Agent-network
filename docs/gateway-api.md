@@ -119,6 +119,29 @@
 
 前端 `fetchTimeseriesJson` 把 `ok:false` 当错误结果处理，主 snapshot/projection 不受影响。
 
+## 5a. GET /api/agent-network/sv-network 与 /sv-maps（SignalVision 只读 relay）
+
+这两个接口是 SignalVision 接入的**务实例外**：网关只读 relay SV Dashboard，不把结果写入 Kafka 黑板，
+用于前端镜像 SV 当前地图与 JunctionAgent 列表。
+
+- `GET /sv-network`：relay SV `/api/network` + `/api/junctions/summary`，返回紧凑几何：
+  ```jsonc
+  { "ok": true, "source": "signalvision",
+    "junctions": [
+      { "id": "1", "x": 0, "y": 0, "congestion": 0.42,
+        "junction_type": "traffic_light", "is_active": true,
+        "total_vehicles": 12, "total_halting": 3 }
+    ],
+    "edges": [ { "id": "...", "x1": 0, "y1": 0, "x2": 1, "y2": 1, "lanes": 2, "length": 80.0 } ],
+    "bounds": { "minX": 0, "maxX": 1, "minY": 0, "maxY": 1 },
+    "junction_count": 9 }
+  ```
+  前端交通地图、智能体列表、实时交通数据、路口指标共用这份当前 SV 路网；因此切换地图后这些面板随
+  `/sv-network` 的 junction/edge 集合一起变化，不再使用 `snapshot` 中的静态 `gateway/topology.py` 路口冒充 SV 智能体。
+- `GET /sv-maps`：relay SV `/api/maps`，返回 `{ok:true,maps:[{name,path,size}],count}`，供前端切图下拉。
+
+SV 不可达时返回 `503 {ok:false,error:{code:"sv_unreachable",...}}`；前端地图可回落静态底图，SV 工具面板显示未连接。
+
 ## 5b. 视频文本问答 + 协作任务（co-host，P7/P9）
 
 视频域逻辑独立在 `backend/anp/video/`，**co-host** 到网关进程（同命名空间，前端复用 `/api/*` 反代）。网关
@@ -142,6 +165,8 @@
 - 取数开关：前端沿用老约定，仅当 URL 带 `?source=gateway` 才尝试网关 snapshot（否则纯 mock 简化壳）。网关有有效节点时状态条显示 `source gateway`，并在右侧 Inspector 挂回命令面板 + 命令闭环（projection 3s 轮询拾取 ack）。
 - 一体化：网关同时托管前端 `dist` 并反代 `/api/*`（沿用老仓库 `serve-with-gateway` 思路，本期暂未做静态托管）。
 - 前端不直连 Kafka；所有数据经本网关。前端字段对齐：命令选项以 snapshot agent 节点的 `metrics.commandTypes` 为权威来源（见 §1.1）。
+- 交通 SV 工具面板的**当前地图事实源**是 `/sv-network`。`snapshot` 仍是 ANP 读模型（World Status + registry + 静态拓扑），
+  不再用于“智能体列表”里的 SV JunctionAgent 枚举。
 
 ## 7. 实现说明（v1，P3 落地）
 

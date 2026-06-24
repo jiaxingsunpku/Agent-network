@@ -24,7 +24,7 @@ def _coord(value: Any) -> tuple[float, float] | None:
 def build_road_geometry(network_body: dict | None, summary_body: dict | None) -> dict:
     """把 SV `/api/network` + `/api/junctions/summary` 归并成紧凑几何。
 
-    返回 ``{junctions:[{id,x,y,congestion,junction_type,total_vehicles,total_halting}],
+    返回 ``{junctions:[{id,x,y,congestion,junction_type,is_active,total_vehicles,total_halting}],
     edges:[{id,x1,y1,x2,y2,lanes,length}], bounds:{minX,maxX,minY,maxY}, junction_count}``。
     """
 
@@ -66,6 +66,7 @@ def build_road_geometry(network_body: dict | None, summary_body: dict | None) ->
                 "x": pos[0], "y": pos[1],
                 "congestion": float(s.get("congestion_level") or 0.0),
                 "junction_type": str(s.get("junction_type") or ""),
+                "is_active": bool(s.get("is_active", True)),
                 "total_vehicles": int(s.get("total_vehicles") or 0),
                 "total_halting": int(s.get("total_halting") or 0),
             }

@@ -121,6 +121,7 @@ export interface SvNetworkJunction {
   y: number;
   congestion: number;
   junction_type: string;
+  is_active?: boolean;
   total_vehicles: number;
   total_halting: number;
 }
