@@ -70,6 +70,23 @@ stop.set(); wc.deregister(); wc.close()
 公共 API：`register()` / `deregister()` / `heartbeat(status, last_error)` / `start_heartbeat(interval, stop)` /
 `publish(topic, env)` / `subscribe(topics, group_id=..., auto_offset_reset="latest")` / `close()`。
 
+**注册流程（端到端）** —— 注册 = 往世界级 lifecycle topic 发一条「自我声明」，**没有中心服务可调**：
+
+1. **发起方（agent 进程）**：`register()` 把 `AgentLifecyclePayload`（id / type / capabilities /
+   command_types / 通道 produces·consumes / weight，model 还带 `members`）装进 envelope
+   （`event_type=AGENT_REGISTERED`，`source.agent_id=agent_id`），发到 `anp.world.agent.lifecycle.v1`，
+   **key=agent_id**（compacted，每 agent 只留最新一条）。`start_heartbeat()` 后台周期发
+   `AGENT_HEARTBEAT` 到 `anp.world.agent.heartbeat.v1`；退出 `deregister()` 发 `AGENT_DEREGISTERED`。
+2. **接收方（registry，跑在网关里，自动）**：**lifecycle consumer 从 earliest** 读 → `apply_envelope`
+   → `register()` 建/更新一条 `AgentRecord`（世界名册）；**heartbeat consumer 从 latest** 读 →
+   刷新 `last_heartbeat_ts` → 按新鲜度派生 `online/degraded/offline`；网关 snapshot / `/world` 读
+   `registry.all()` 渲染节点（地图摆位 = 通道 key 对应实体的坐标）。
+3. **要点**：register（一次性·compacted·名册）vs heartbeat（周期·活性）是**两条 topic、两种语义**，
+   别混；register **幂等**（能力/通道变了重发一条即可）；**自描述、无中心**——任何居民（网关、别的
+   model）从 earliest 读 compacted lifecycle 就能重建「世界有谁、各自什么通道」，**新加一个 agent 平台零改**。
+
+最小写法见上面的代码片段：给它 id + 通道，`register()` + `start_heartbeat()` 即进世界。
+
 ### 2.2 数据 / 命令 / ack 契约（已有，别另造）
 
 - **造 envelope** 一律走 `anp.contracts` 的 builder：`observation_envelope` / `video_text_envelope` /
@@ -96,15 +113,25 @@ stop.set(); wc.deregister(); wc.close()
 }
 ```
 - `subscribe_topics` 留空时，ModelRuntime 会用 registry 按成员 agent 的 `produces` 求并集推导。
-- 跑：`python backend/scripts/run_model.py --spec specs/your_model.json`（自注册成 model agent + 一 model 一 group + 跑 workflow）。
+- 跑：`python backend/scripts/run_model.py --spec specs/your_model.json`。model 启动时**走同一套注册
+  流程自注册成一个 agent**（`agent_type="model"`，并把 `member_agent_ids` 作为 `members` 自报进世界），
+  一 model 一 consumer group 跑 workflow。所以它一启动就出现在世界名册 + 左侧「自发现 model 列表」，
+  并带上「它管辖谁」——前端据此高亮成员、画治理边。
 - **自定义 workflow**：实现一个带 `feed_record(value)`（+可选 `flush()`）的对象，在 `run_model.py::_build_workflow`
   里注册名字，或直接用 `ModelRuntime(spec, workflow=你的对象, bootstrap=...)`。
 
 ### 2.4 发现（registry catalog）
 
 registry 已提供（`backend/anp/registry/registry.py`）：`catalog_by_topic()`（按 topic/per-key 反查谁产谁消）、
-`agents_covering(topic, key=None)`、`agents_with_capability(cap)`。网关对外的 `/api/agent-network/world` 路由是
-平台侧后续尾巴（方法已就绪）。
+`agents_covering(topic, key=None)`、`agents_with_capability(cap)`。
+
+网关对外的只读接口 `GET /api/agent-network/world` 暴露统一世界给前端：
+- `agents[]`：id / type / 状态 / 通道 / **位置**（由通道 key→实体坐标派生，无坐标=非地理公民）/ `governed_by[]`（归属哪些 model）；
+- `models[]`：model_id / problem / `members[]`（自报的管辖成员）/ produce_topics / 状态；
+- `catalog`：topic→producers/consumers（含 per-key）。
+
+实体坐标来源：路口取自拓扑；**其它实体（摄像头等）留一个 location provider 钩子，未来由视频组提供**，
+查不到坐标的 agent 自动落入「非地理公民」。
 
 ---
 

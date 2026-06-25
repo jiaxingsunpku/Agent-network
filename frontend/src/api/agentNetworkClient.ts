@@ -5,7 +5,8 @@ import {
   SelectionRef,
   NetworkEvent,
   AgentNetworkCommandType,
-  NetworkSnapshot
+  NetworkSnapshot,
+  NodeStatus
 } from "../types";
 
 const env = import.meta.env as Record<string, string | undefined>;
@@ -113,6 +114,108 @@ export async function fetchNetworkSnapshot(scope?: string): Promise<NetworkSnaps
   if (!response.headers.get("content-type")?.includes("application/json")) return null;
   const data = await response.json();
   return normalizeNetworkSnapshot(data);
+}
+
+// --------------------------------------------------------------------------- //
+// 统一世界视图（网关 /world）：跨域 agent + model + catalog（docs/world-platform.md）
+// --------------------------------------------------------------------------- //
+export interface WorldChannel {
+  topic: string;
+  keys: string[];
+}
+
+export interface WorldAgentLocation {
+  x: number;
+  y: number;
+  entity: string;
+}
+
+export interface WorldAgent {
+  id: string;
+  agentType: string;
+  status: NodeStatus;
+  capabilities: string[];
+  commandTypes: string[];
+  weight: number;
+  produces: WorldChannel[];
+  consumes: WorldChannel[];
+  location: WorldAgentLocation | null; // null = 非地理公民
+  governedBy: string[]; // 归属哪些 model
+}
+
+export interface WorldModel {
+  modelId: string;
+  status: NodeStatus;
+  members: string[];
+  produceTopics: string[];
+  subscribeTopics: string[];
+  weight: number;
+}
+
+export interface WorldCatalogEntry {
+  producers: string[];
+  consumers: string[];
+  keys?: Record<string, { producers: string[]; consumers: string[] }>;
+}
+
+export interface WorldView {
+  generatedAt: string;
+  agents: WorldAgent[];
+  models: WorldModel[];
+  catalog: Record<string, WorldCatalogEntry>;
+}
+
+function normChannels(raw: any): WorldChannel[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((c) => ({ topic: String(c.topic ?? ""), keys: Array.isArray(c.keys) ? c.keys.map(String) : [] }));
+}
+
+function normalizeWorldAgent(raw: any): WorldAgent {
+  const loc = raw.location;
+  const cmd = raw.commandTypes ?? raw.command_types;
+  const gov = raw.governedBy ?? raw.governed_by;
+  return {
+    id: String(raw.id),
+    agentType: camel(raw.agentType ?? raw.agent_type, "agent"),
+    status: camel(raw.status, "syncing") as NodeStatus,
+    capabilities: Array.isArray(raw.capabilities) ? raw.capabilities.map(String) : [],
+    commandTypes: Array.isArray(cmd) ? cmd.map(String) : [],
+    weight: Number(raw.weight ?? 1),
+    produces: normChannels(raw.produces),
+    consumes: normChannels(raw.consumes),
+    location: loc && typeof loc === "object" ? { x: Number(loc.x ?? 0), y: Number(loc.y ?? 0), entity: String(loc.entity ?? "") } : null,
+    governedBy: Array.isArray(gov) ? gov.map(String) : []
+  };
+}
+
+function normalizeWorldModel(raw: any): WorldModel {
+  return {
+    modelId: String(raw.modelId ?? raw.model_id),
+    status: camel(raw.status, "syncing") as NodeStatus,
+    members: Array.isArray(raw.members) ? raw.members.map(String) : [],
+    produceTopics: Array.isArray(raw.produceTopics ?? raw.produce_topics) ? (raw.produceTopics ?? raw.produce_topics).map(String) : [],
+    subscribeTopics: Array.isArray(raw.subscribeTopics ?? raw.subscribe_topics) ? (raw.subscribeTopics ?? raw.subscribe_topics).map(String) : [],
+    weight: Number(raw.weight ?? 1)
+  };
+}
+
+/** 统一世界（网关 /world）。不可达/未启用时返回 null（前端回落）。 */
+export async function fetchWorld(): Promise<WorldView | null> {
+  try {
+    const response = await fetchAgentNetwork("/world", { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    if (!response.headers.get("content-type")?.includes("application/json")) return null;
+    const data = await response.json();
+    if (!Array.isArray(data?.agents)) return null;
+    return {
+      generatedAt: camel(data.generatedAt ?? data.generated_at, new Date().toISOString()),
+      agents: data.agents.map(normalizeWorldAgent),
+      models: Array.isArray(data.models) ? data.models.map(normalizeWorldModel) : [],
+      catalog: (data.catalog ?? {}) as Record<string, WorldCatalogEntry>
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface SvNetworkJunction {

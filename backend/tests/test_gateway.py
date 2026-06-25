@@ -20,9 +20,10 @@ from anp.contracts import (
     StatusWindow,
     iso_utc,
 )
+from anp.contracts import Channel, TrafficTopics
 from anp.gateway import GatewayState, build_snapshot, create_app
 from anp.gateway.config import GatewayConfig
-from anp.registry import seed_default_registry
+from anp.registry import Registry, seed_default_registry
 from anp.system_agent import LatestStatusStore
 
 
@@ -71,6 +72,45 @@ def _make_state(*, producer=None, config: GatewayConfig | None = None) -> Gatewa
 
 def _client(state: GatewayState) -> TestClient:
     return TestClient(create_app(state))
+
+
+def test_world_endpoint_agents_models_catalog():
+    reg = Registry()
+    reg.register(
+        agent_id="leaf-1",
+        agent_type="virtual",
+        capabilities=["perception"],
+        produces=[Channel(topic=TrafficTopics.OBSERVATION, keys=["gg-xiongchu-minzu"])],
+        consumes=[Channel(topic=TrafficTopics.COMMAND, keys=["gg-xiongchu-minzu"])],
+    )
+    reg.register(
+        agent_id="m-traffic",
+        agent_type="model",
+        capabilities=["model"],
+        members=["leaf-1"],
+        produces=[Channel(topic=TrafficTopics.STATUS_INTERSECTION)],
+        consumes=[Channel(topic=TrafficTopics.OBSERVATION)],
+    )
+    state = GatewayState(config=GatewayConfig(with_consumers=False), registry=reg, producer=FakeProducer())
+    resp = _client(state).get("/api/agent-network/world")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"]
+
+    agents = {a["id"]: a for a in body["agents"]}
+    # 位置由通道 key→拓扑路口坐标派生。
+    assert agents["leaf-1"]["location"]["entity"] == "gg-xiongchu-minzu"
+    assert agents["leaf-1"]["location"]["x"] == -220.0
+    # 反向索引：leaf 归属 model。
+    assert agents["leaf-1"]["governed_by"] == ["m-traffic"]
+    # model 本身也是 agent 节点（万物皆 agent）。
+    assert agents["m-traffic"]["agent_type"] == "model"
+
+    models = {mm["model_id"]: mm for mm in body["models"]}
+    assert models["m-traffic"]["members"] == ["leaf-1"]
+    assert TrafficTopics.STATUS_INTERSECTION in models["m-traffic"]["produce_topics"]
+    # catalog 按 topic 反查谁产。
+    assert "leaf-1" in body["catalog"][TrafficTopics.OBSERVATION]["producers"]
 
 
 # --------------------------------------------------------------------------- #

@@ -10,15 +10,22 @@ from ..contracts import TrafficTopics, WorldTopics
 from ..messaging import make_consumer
 from .registry import Registry
 
-#: registry 订阅的 lifecycle/heartbeat topic —— **双读过渡**：世界级 + 交通级。
-#: 世界级是目标名册；交通级保留，让尚未迁到 WorldClient 的交通体（如 SV 感知/执行体）
-#: 仍可见。各组迁完后从这里撤掉交通级即可。视频域目前无 agent lifecycle 层。
-REGISTRY_TOPICS: list[str] = [
+#: registry 订阅 —— **双读过渡**（世界级 + 交通级），且 **lifecycle 与 heartbeat 分开读**：
+#: - lifecycle（名册，低频）从 **earliest** 重建世界成员（world.lifecycle 已 compact，代价小）；
+#: - heartbeat（活性，高频）从 **latest** 读当前心跳——绝不能 earliest，否则历史心跳积压
+#:   （traffic.heartbeat 可达数万条）会让 live agent 长时间误判为 offline。
+#: 各组迁完后从这两组里撤掉交通级即可。视频域目前无 agent lifecycle 层。
+REGISTRY_LIFECYCLE_TOPICS: list[str] = [
     WorldTopics.AGENT_LIFECYCLE,
-    WorldTopics.AGENT_HEARTBEAT,
     TrafficTopics.AGENT_LIFECYCLE,
+]
+REGISTRY_HEARTBEAT_TOPICS: list[str] = [
+    WorldTopics.AGENT_HEARTBEAT,
     TrafficTopics.AGENT_HEARTBEAT,
 ]
+#: 兼容旧调用（合并）。注意 build_registry_consumer 用它+earliest，仅供非 live 工具，
+#: live 网关请用上面两组分别 earliest/latest（见 gateway/consumers.py）。
+REGISTRY_TOPICS: list[str] = REGISTRY_LIFECYCLE_TOPICS + REGISTRY_HEARTBEAT_TOPICS
 
 
 class RegistryConsumer:

@@ -23,7 +23,11 @@ from ..contracts import (
     parse_payload,
 )
 from ..messaging import make_consumer
-from ..registry.service import REGISTRY_TOPICS, RegistryConsumer
+from ..registry.service import (
+    REGISTRY_HEARTBEAT_TOPICS,
+    REGISTRY_LIFECYCLE_TOPICS,
+    RegistryConsumer,
+)
 from .state import GatewayState
 
 
@@ -89,7 +93,9 @@ class GatewayConsumers:
         self._closing = False
         self.status = _StatusConsumer(state)
         self.ack = _AckConsumer(state)
-        self.registry = RegistryConsumer(state.registry)
+        # lifecycle 与 heartbeat 分开消费（不同 offset 策略），共享同一 registry。
+        self.registry_lc = RegistryConsumer(state.registry)
+        self.registry_hb = RegistryConsumer(state.registry)
 
     def _guarded(self, name: str, svc, consumer):
         """线程入口：正常退出/停机静默；非停机期的异常打印一行，便于排障。"""
@@ -115,18 +121,25 @@ class GatewayConsumers:
             bootstrap_servers=bootstrap,
             auto_offset_reset="latest",
         )
-        registry_consumer = make_consumer(
-            REGISTRY_TOPICS,  # 双读：世界级 + 交通级 lifecycle/heartbeat
-            group_id="anp-gateway-registry",
+        registry_lc_consumer = make_consumer(
+            REGISTRY_LIFECYCLE_TOPICS,  # 名册：world + 交通 lifecycle
+            group_id="anp-gateway-registry-lc",
             bootstrap_servers=bootstrap,
-            auto_offset_reset="earliest",  # 从头重建世界名册
+            auto_offset_reset="earliest",  # 从头重建世界名册（低频，代价小）
         )
-        self._consumers = [status_consumer, ack_consumer, registry_consumer]
+        registry_hb_consumer = make_consumer(
+            REGISTRY_HEARTBEAT_TOPICS,  # 活性：world + 交通 heartbeat
+            group_id="anp-gateway-registry-hb",
+            bootstrap_servers=bootstrap,
+            auto_offset_reset="latest",  # 只读当前心跳，跳过历史积压（不然 live 误判离线）
+        )
+        self._consumers = [status_consumer, ack_consumer, registry_lc_consumer, registry_hb_consumer]
 
         for name, svc, consumer in (
             ("status", self.status, status_consumer),
             ("ack", self.ack, ack_consumer),
-            ("registry", self.registry, registry_consumer),
+            ("registry-lc", self.registry_lc, registry_lc_consumer),
+            ("registry-hb", self.registry_hb, registry_hb_consumer),
         ):
             t = threading.Thread(target=self._guarded, args=(name, svc, consumer), name=f"gw-{name}", daemon=True)
             t.start()

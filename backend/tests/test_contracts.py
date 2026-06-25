@@ -156,7 +156,7 @@ def test_lifecycle_channels_backward_compatible():
     old = c.AgentLifecyclePayload.model_validate(
         {"agent_id": "a", "agent_type": "virtual", "capabilities": ["perception"], "command_types": []}
     )
-    assert old.produces == [] and old.consumes == [] and old.weight == 1.0
+    assert old.produces == [] and old.consumes == [] and old.weight == 1.0 and old.members == []
 
     new = c.AgentLifecyclePayload(
         agent_id="a",

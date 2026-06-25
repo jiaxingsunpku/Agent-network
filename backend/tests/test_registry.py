@@ -158,6 +158,25 @@ def test_apply_envelope_carries_channels_and_weight():
     assert "m" in reg.catalog_by_topic()["t.status"]["producers"]
 
 
+def test_models_and_governed_by():
+    reg = Registry()
+    reg.register(agent_id="leaf", agent_type="virtual", now=BASE)
+    reg.register(agent_id="m1", agent_type="model", members=["leaf"], now=BASE)
+    reg.register(agent_id="m2", agent_type="model", members=["leaf"], now=BASE)
+    assert {r.agent_id for r in reg.models()} == {"m1", "m2"}
+    assert sorted(reg.governed_by("leaf")) == ["m1", "m2"]  # 共享成员
+    assert reg.governed_by("m1") == []
+
+    # members 经 lifecycle 自报 → 进 record。
+    env = c.make_envelope(
+        event_type=c.EventType.AGENT_REGISTERED,
+        source=c.Source(system=c.SourceSystem.PLATFORM, agent_id="m3"),
+        payload=c.AgentLifecyclePayload(agent_id="m3", agent_type="model", members=["leaf", "x"]),
+    )
+    assert reg.apply_envelope(env, now=BASE)
+    assert reg.get("m3").members == ["leaf", "x"]
+
+
 def test_seed_agents_have_channels():
     reg = seed_default_registry(now=BASE)
     cat = reg.catalog_by_topic()

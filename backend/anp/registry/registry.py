@@ -60,11 +60,12 @@ class Registry:
         produces: list[Channel] | None = None,
         consumes: list[Channel] | None = None,
         weight: float | None = None,
+        members: list[str] | None = None,
         now: datetime | None = None,
     ) -> AgentRecord:
-        """注册或更新一个智能体（幂等：重复注册刷新能力/命令类型/通道，保留心跳）。
+        """注册或更新一个智能体（幂等：重复注册刷新能力/命令类型/通道/成员，保留心跳）。
 
-        通道（produces/consumes）与 weight 未传（None）时保留已有值，容忍只刷新
+        通道（produces/consumes）、weight、members 未传（None）时保留已有值，容忍只刷新
         部分字段的重复注册。
         """
 
@@ -79,6 +80,7 @@ class Registry:
                 produces=list(produces) if produces is not None else (existing.produces if existing else []),
                 consumes=list(consumes) if consumes is not None else (existing.consumes if existing else []),
                 weight=weight if weight is not None else (existing.weight if existing else 1.0),
+                members=list(members) if members is not None else (existing.members if existing else []),
                 registered_at=existing.registered_at if existing else ts,
                 reported_status=existing.reported_status if existing else None,
                 last_heartbeat_ts=existing.last_heartbeat_ts if existing else None,
@@ -146,6 +148,7 @@ class Registry:
                 produces=payload.produces,
                 consumes=payload.consumes,
                 weight=payload.weight,
+                members=payload.members,
                 now=ts,
             )
             return True
@@ -234,6 +237,20 @@ class Registry:
         with self._lock:
             records = list(self._agents.values())
         return [rec for rec in records if capability in rec.capabilities]
+
+    def models(self) -> list[AgentRecord]:
+        """返回所有 model（``agent_type == "model"``）—— 左侧「自发现 model 列表」用。"""
+
+        with self._lock:
+            records = list(self._agents.values())
+        return [rec for rec in records if rec.agent_type == "model"]
+
+    def governed_by(self, agent_id: str) -> list[str]:
+        """返回管辖 ``agent_id`` 的 model_id 列表（按 members 反向索引；共享成员可多个）。"""
+
+        with self._lock:
+            records = list(self._agents.values())
+        return [rec.agent_id for rec in records if rec.agent_type == "model" and agent_id in rec.members]
 
     # -- 命令目标白名单（docs/gateway-api.md §3、protocol.md §7）----------- #
     def authorize_command(self, agent_id: str, command_type: str) -> CommandAuthz:

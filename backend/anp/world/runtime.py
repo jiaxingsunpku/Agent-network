@@ -45,6 +45,7 @@ class ModelRuntime:
             produces=[Channel(topic=t) for t in spec.produce_topics],
             consumes=[Channel(topic=t) for t in subscribe],
             weight=spec.weight,
+            members=spec.member_agent_ids,  # 自报管辖成员 → 进世界名册
             source_system=SourceSystem.PLATFORM,
             bootstrap=bootstrap,
             producer=producer,

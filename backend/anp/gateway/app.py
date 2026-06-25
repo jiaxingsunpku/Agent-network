@@ -85,6 +85,14 @@ def create_app(state: GatewayState | None = None) -> FastAPI:
         proj = mapping.build_projection(state, kind, id)
         return JSONResponse(content=proj.model_dump(mode="json"))
 
+    # -- 读：world（统一世界总览：跨域 agent + model + catalog）----------- #
+    @app.get(API_PREFIX + "/world")
+    def get_world(request: Request) -> JSONResponse:
+        denied = require_read(request)
+        if denied:
+            return denied
+        return JSONResponse(content=mapping.build_world(state))
+
     # -- 读：sv-network（真实 SV 路网几何，前端画真图）-------------------- #
     # 务实例外：网关唯一一处直连外部源 HTTP（SV /api/network），只读几何、不入 Kafka 黑板；
     # SV 原生结构的解析在 adapter（build_road_geometry），网关只搬运。同步 def → 线程池跑阻塞 IO。

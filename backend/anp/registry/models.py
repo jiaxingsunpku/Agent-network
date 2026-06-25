@@ -39,6 +39,8 @@ class AgentRecord(BaseModel):
     consumes: list[Channel] = Field(default_factory=list)
     #: 协作权重，先开槽默认 1.0、暂不驱动逻辑。
     weight: float = Field(default=1.0, ge=0.0)
+    #: model 自报的管辖成员 agent_id（叶子 agent 为空）。
+    members: list[str] = Field(default_factory=list)
     registered_at: datetime
     #: 心跳 payload 里的自报状态（online/degraded/offline…），无心跳时为 None。
     reported_status: str | None = None

@@ -158,10 +158,12 @@ class AgentLifecyclePayload(_Strict):
     agent_type: str = Field(min_length=1)  # 如 "virtual" / "model"
     capabilities: list[str] = Field(default_factory=list)  # 如 ["perception", "exec"]
     command_types: list[str] = Field(default_factory=list)  # 可接收的命令类型
-    #: 统一世界通道声明（加法、向后兼容：旧消息无此三字段，按默认值 validate）。
+    #: 统一世界通道声明（加法、向后兼容：旧消息无此字段，按默认值 validate）。
     produces: list[Channel] = Field(default_factory=list)  # 本 agent 产出的通道
     consumes: list[Channel] = Field(default_factory=list)  # 本 agent 订阅的通道
     weight: float = Field(default=1.0, ge=0.0)  # 协作权重，先开槽暂不驱动逻辑
+    #: model 专用：自报管辖的成员 agent_id（叶子 agent 留空）。前端据此高亮成员、画治理边。
+    members: list[str] = Field(default_factory=list)
 
 
 class AgentHeartbeatPayload(_Strict):

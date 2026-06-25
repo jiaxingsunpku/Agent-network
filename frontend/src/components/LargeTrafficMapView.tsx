@@ -6,8 +6,15 @@ import {
   fetchSvNetwork,
   sendAgentNetworkCommand,
   SvMapEntry,
-  SvNetworkGeometry
+  SvNetworkGeometry,
+  WorldAgent
 } from "../api/agentNetworkClient";
+
+const AGENT_RING = "#7f77dd"; // 驻留 agent 的路口标记色（紫）
+
+function statusZh(status: string): string {
+  return { online: "在线", warning: "降级", degraded: "降级", offline: "离线", syncing: "同步" }[status] ?? status;
+}
 
 function nodeCommandTypes(node: AgentNode | undefined): string[] {
   const raw = node?.metrics?.commandTypes ?? node?.metrics?.command_types;
@@ -82,6 +89,14 @@ interface Props {
   snapshot?: NetworkSnapshot;
   svNetwork?: SvNetworkGeometry | null;
   onSvNetworkChange?: (geo: SvNetworkGeometry | null) => void;
+  /** 统一世界 agent（/world）：按通道 key 认领图上 junction，标记 + 详情卡显示归属 model。 */
+  worldAgents?: WorldAgent[];
+  /** agentMode：路网仅作底图，agent 才是可点节点；点击 agent 节点回调 onAgentSelect，不弹路口详情卡。 */
+  agentMode?: boolean;
+  onAgentSelect?: (agent: WorldAgent | null) => void;
+  selectedAgentId?: string | null;
+  /** model 视图：只高亮这些成员 agent，其余 agent 标记淡化。null/缺省=世界总览(全部正常)。 */
+  focusAgentIds?: string[] | null;
 }
 
 const MAP_URL = "/large-traffic-map.json";
@@ -157,7 +172,7 @@ function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: n
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSvNetworkChange }: Props) {
+export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSvNetworkChange, worldAgents, agentMode, onAgentSelect, selectedAgentId, focusAgentIds }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const camera = useRef<CameraState>({ x: 0, y: 0, scale: 0.08 });
   const drag = useRef({ active: false, lastX: 0, lastY: 0, moved: false });
@@ -179,6 +194,23 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
     () => snapshot?.nodes.find((node) => nodeCommandTypes(node).includes("set_signal_map")),
     [snapshot]
   );
+
+  // junction id → 驻留其上的 agent（按通道 key 匹配）。世界总览叠加层用。
+  const agentsByJunction = useMemo(() => {
+    const map = new Map<string, WorldAgent[]>();
+    for (const agent of worldAgents ?? []) {
+      const keys = new Set<string>();
+      for (const ch of [...(agent.produces ?? []), ...(agent.consumes ?? [])]) {
+        for (const k of ch.keys) keys.add(k);
+      }
+      for (const k of keys) {
+        const arr = map.get(k) ?? [];
+        if (!arr.includes(agent)) arr.push(agent);
+        map.set(k, arr);
+      }
+    }
+    return map;
+  }, [worldAgents]);
 
   // 重取真实 SV 路网几何并重绘（切图后轮询用）。返回新路口数（不可达=null），供校验几何是否真的变了。
   const reloadSvNetwork = useCallback(async () => {
@@ -419,6 +451,17 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
       const isLivePulse = runtime ? (Math.floor(runtimeFrame + numericSeed(inter.id)) % 13 === 0) : false;
       const radius = Math.max(4, Math.min(9, 3.5 + inter.priority / 9)) + (isLivePulse ? 1.2 : 0);
 
+      // agentMode：非 agent 路口淡化成纯底图小点（节点身份让给 agent），不画光晕/标签。
+      if (agentMode && !agentsByJunction.has(inter.id)) {
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        return;
+      }
+
       ctx.globalAlpha = isSelected || isHover || isMatch ? 0.2 : 0.1;
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -451,6 +494,23 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         ctx.stroke();
       }
 
+      if (agentsByJunction.has(inter.id)) {
+        const ags = agentsByJunction.get(inter.id)!;
+        const agentSelected = !!selectedAgentId && ags.some((a) => a.id === selectedAgentId);
+        const inFocus = !focusAgentIds || ags.some((a) => focusAgentIds.includes(a.id));
+        ctx.globalAlpha = inFocus ? 1 : 0.22;
+        ctx.strokeStyle = agentSelected ? "#2563eb" : AGENT_RING;
+        ctx.lineWidth = agentSelected ? 3.2 : 2.4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = AGENT_RING;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
       if (isSelected || isHover || isMatch || important) {
         labels += 1;
         ctx.font = `${isSelected || isHover ? 700 : 650} 11px Inter, Microsoft YaHei, sans-serif`;
@@ -477,7 +537,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
       ctx.stroke();
     }
 
-  }, [data, highlightIds, mapY, pulseFrame, runtime, selected, worldToScreen]);
+  }, [agentMode, agentsByJunction, data, focusAgentIds, highlightIds, mapY, pulseFrame, runtime, selected, selectedAgentId, worldToScreen]);
 
   useEffect(() => {
     if (!data) return;
@@ -545,7 +605,16 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
       drag.current.active = false;
       if (!wasDrag) {
         const hit = hitTest(p.x, p.y);
-        setSelected(hit);
+        if (agentMode) {
+          if (hit?.kind === "intersection") {
+            const ags = agentsByJunction.get(hit.id);
+            onAgentSelect?.(ags && ags.length ? ags[0] : null);
+          } else {
+            onAgentSelect?.(null);
+          }
+        } else {
+          setSelected(hit);
+        }
       }
     };
     const onWheel = (event: WheelEvent) => {
@@ -576,7 +645,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
       canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", onResize);
     };
-  }, [data, draw, hitTest, resetView, screenToWorld]);
+  }, [agentMode, agentsByJunction, data, draw, hitTest, onAgentSelect, resetView, screenToWorld]);
 
   const zoom = (factor: number) => {
     const canvas = canvasRef.current;
@@ -650,20 +719,36 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         </div>
       )}
 
-      {selected && (
+      {selected && !agentMode && (
         <div className="large-map-detail-card">
           <button onClick={clearSelection} title="关闭">×</button>
           <div className="traffic-kicker">{selected.kind === "intersection" ? "信号路口详情" : "道路边详情"}</div>
           <h3>{selected.label}</h3>
           {selected.kind === "intersection" ? (
-            <div className="traffic-detail-grid">
-              <span><b>{selected.data.incoming}</b>进入道路</span>
-              <span><b>{selected.data.outgoing}</b>离开道路</span>
-              <span><b>{selected.data.incomingLanes}</b>进入车道</span>
-              <span><b>{selected.data.outgoingLanes}</b>离开车道</span>
-              <span><b>{congestionLabel(selected.data.congestion)}</b>估计状态</span>
-              <span><b>{selected.data.priority}</b>复杂度</span>
-            </div>
+            <>
+              <div className="traffic-detail-grid">
+                <span><b>{selected.data.incoming}</b>进入道路</span>
+                <span><b>{selected.data.outgoing}</b>离开道路</span>
+                <span><b>{selected.data.incomingLanes}</b>进入车道</span>
+                <span><b>{selected.data.outgoingLanes}</b>离开车道</span>
+                <span><b>{congestionLabel(selected.data.congestion)}</b>估计状态</span>
+                <span><b>{selected.data.priority}</b>复杂度</span>
+              </div>
+              {(agentsByJunction.get(selected.id)?.length ?? 0) > 0 && (
+                <div style={{ marginTop: 10, borderTop: "0.5px solid rgba(128,128,128,0.25)", paddingTop: 8 }}>
+                  <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 4 }}>驻留智能体</div>
+                  {agentsByJunction.get(selected.id)!.map((a) => (
+                    <div key={a.id} style={{ fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: AGENT_RING, marginRight: 6, verticalAlign: "middle" }} />
+                      <b>{a.id}</b> · {a.agentType} · {statusZh(a.status)}
+                      <div style={{ opacity: 0.7, marginLeft: 13 }}>
+                        被 model 使用：{a.governedBy.length ? a.governedBy.join("、") : "（未被 model 管辖）"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             <div className="traffic-detail-grid">
               <span><b>{selected.data.lanes}</b>车道</span>

@@ -635,3 +635,97 @@ def build_projection(state, kind: str, target_id: str, now: datetime | None = No
         proj = _resource_projection(state, target_id)
         return proj or _fallback_projection(kind, target_id)
     return _fallback_projection(kind, target_id)
+
+
+# --------------------------------------------------------------------------- #
+# 统一世界视图（/world）：跨域 agent + model + catalog（前端世界总览/model 视图用）
+# --------------------------------------------------------------------------- #
+#: 实体坐标 provider 钩子 —— 路口外的实体（摄像头等）坐标由此注册，**未来视频组提供**。
+#: 形如 ``fn(entity_key) -> (x, y) | None``。
+_LOCATION_PROVIDERS: list = []
+
+
+def register_location_provider(fn) -> None:
+    """注册一个 ``entity_key -> (x, y) | None`` 的坐标 provider（如摄像头坐标）。"""
+
+    _LOCATION_PROVIDERS.append(fn)
+
+
+def _resolve_entity_location(key: str, topology: Topology) -> tuple[float, float] | None:
+    """实体 key → 坐标：先查拓扑路口，再问已注册 provider；都没有返回 None。"""
+
+    spec = topology.get_intersection(key)
+    if spec is not None:
+        return (spec.x, spec.y)
+    for fn in _LOCATION_PROVIDERS:
+        try:
+            loc = fn(key)
+        except Exception:  # noqa: BLE001 - provider 失败不应拖垮 /world
+            loc = None
+        if loc is not None:
+            return (float(loc[0]), float(loc[1]))
+    return None
+
+
+def _agent_world_location(record: AgentRecord, topology: Topology) -> dict | None:
+    """agent 地图位置 = 其通道（先 produces 后 consumes）首个可解析 key 的实体坐标；无则非地理。"""
+
+    for channels in (record.produces, record.consumes):
+        for ch in channels:
+            for key in ch.keys:
+                loc = _resolve_entity_location(key, topology)
+                if loc is not None:
+                    return {"x": loc[0], "y": loc[1], "entity": key}
+    return None
+
+
+def _channel_dicts(channels: list) -> list[dict]:
+    return [{"topic": ch.topic, "keys": list(ch.keys)} for ch in channels]
+
+
+def build_world(state, now: datetime | None = None) -> dict:
+    """统一世界只读视图：跨域 agent（含位置/通道/归属 model）+ model（含成员）+ catalog。
+
+    纯读 registry + 静态拓扑（坐标），不碰 Kafka。供 ``GET /api/agent-network/world``。
+    """
+
+    now = now or state.now()
+    registry: Registry = state.registry
+    topology: Topology = state.topology
+    records = registry.all()
+
+    agents = [
+        {
+            "id": rec.agent_id,
+            "agent_type": rec.agent_type,
+            "status": _AGENT_STATUS_MAP[rec.derived_status(now)],
+            "capabilities": list(rec.capabilities),
+            "command_types": list(rec.command_types),
+            "weight": rec.weight,
+            "produces": _channel_dicts(rec.produces),
+            "consumes": _channel_dicts(rec.consumes),
+            "location": _agent_world_location(rec, topology),  # None = 非地理公民
+            "governed_by": registry.governed_by(rec.agent_id),
+        }
+        for rec in records
+    ]
+
+    models = [
+        {
+            "model_id": rec.agent_id,
+            "status": _AGENT_STATUS_MAP[rec.derived_status(now)],
+            "members": list(rec.members),
+            "produce_topics": [ch.topic for ch in rec.produces],
+            "subscribe_topics": [ch.topic for ch in rec.consumes],
+            "weight": rec.weight,
+        }
+        for rec in registry.models()
+    ]
+
+    return {
+        "ok": True,
+        "generated_at": iso_utc(now),
+        "agents": agents,
+        "models": models,
+        "catalog": registry.catalog_by_topic(),
+    }

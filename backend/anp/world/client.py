@@ -46,6 +46,7 @@ class WorldClient:
         produces: Iterable[Channel] = (),
         consumes: Iterable[Channel] = (),
         weight: float = 1.0,
+        members: Iterable[str] = (),
         source_system: SourceSystem = SourceSystem.COLLABORATIVE_AGENT,
         bootstrap: str | None = None,
         producer=None,
@@ -57,6 +58,7 @@ class WorldClient:
         self.produces = list(produces)
         self.consumes = list(consumes)
         self.weight = weight
+        self.members = list(members)  # model 自报管辖成员；叶子 agent 为空
         self.source_system = source_system
         self.bootstrap = bootstrap
         self._producer = producer
@@ -83,6 +85,7 @@ class WorldClient:
             produces=self.produces,
             consumes=self.consumes,
             weight=self.weight,
+            members=self.members,
         )
         return make_envelope(
             event_type=EventType.AGENT_REGISTERED if registered else EventType.AGENT_DEREGISTERED,

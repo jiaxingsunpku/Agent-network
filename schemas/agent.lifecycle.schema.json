@@ -70,6 +70,13 @@
       "minimum": 0.0,
       "title": "Weight",
       "type": "number"
+    },
+    "members": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Members",
+      "type": "array"
     }
   },
   "required": [
