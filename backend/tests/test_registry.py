@@ -138,6 +138,33 @@ def test_register_preserves_channels_when_not_provided():
     assert rec.produces and rec.produces[0].topic == "t.obs" and rec.weight == 3.0
 
 
+def test_register_empty_channels_do_not_clear_world_transition_metadata():
+    reg = Registry()
+    reg.register(
+        agent_id="traffic-exec-sv-001",
+        agent_type="signalvision",
+        capabilities=["exec"],
+        command_types=["control_signal_inference"],
+        produces=[c.Channel(topic="t.ack")],
+        consumes=[c.Channel(topic="t.command", keys=["gg-xiongchu-minzu"])],
+        now=BASE,
+    )
+    # 旧 traffic lifecycle 在过渡期可能晚于 world lifecycle 到达，并带空通道。
+    reg.register(
+        agent_id="traffic-exec-sv-001",
+        agent_type="signalvision",
+        capabilities=["exec"],
+        command_types=["control_signal_inference"],
+        produces=[],
+        consumes=[],
+        now=BASE,
+    )
+
+    rec = reg.get("traffic-exec-sv-001")
+    assert [(ch.topic, ch.keys) for ch in rec.produces] == [("t.ack", [])]
+    assert [(ch.topic, ch.keys) for ch in rec.consumes] == [("t.command", ["gg-xiongchu-minzu"])]
+
+
 def test_apply_envelope_carries_channels_and_weight():
     reg = Registry()
     env = c.make_envelope(

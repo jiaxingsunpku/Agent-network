@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 
 from pydantic import ValidationError
@@ -121,15 +122,18 @@ class GatewayConsumers:
             bootstrap_servers=bootstrap,
             auto_offset_reset="latest",
         )
+        # Registry 读模型是内存态；每次 gateway 启动都应该从 compacted world lifecycle
+        # 重新构建名册，不能复用旧消费组位置。heartbeat 也用临时组，只读启动后的新心跳。
+        registry_group_suffix = os.getpid()
         registry_lc_consumer = make_consumer(
             REGISTRY_LIFECYCLE_TOPICS,  # 名册：world + 交通 lifecycle
-            group_id="anp-gateway-registry-lc",
+            group_id=f"anp-gateway-registry-lc-{registry_group_suffix}",
             bootstrap_servers=bootstrap,
             auto_offset_reset="earliest",  # 从头重建世界名册（低频，代价小）
         )
         registry_hb_consumer = make_consumer(
             REGISTRY_HEARTBEAT_TOPICS,  # 活性：world + 交通 heartbeat
-            group_id="anp-gateway-registry-hb",
+            group_id=f"anp-gateway-registry-hb-{registry_group_suffix}",
             bootstrap_servers=bootstrap,
             auto_offset_reset="latest",  # 只读当前心跳，跳过历史积压（不然 live 误判离线）
         )

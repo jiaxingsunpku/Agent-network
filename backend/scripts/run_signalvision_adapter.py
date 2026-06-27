@@ -31,6 +31,7 @@ from anp.adapters.signalvision import (  # noqa: E402
     SV_ADAPTER_AGENT_ID,
     SignalVisionAdapter,
     SignalVisionAdapterConfig,
+    build_signalvision_adapter_world_client,
     lifecycle_envelope,
 )
 from anp.contracts import TrafficTopics  # noqa: E402
@@ -70,11 +71,13 @@ def main() -> int:
         f"[sv-adapter] agent_id={config.agent_id} sv={config.sv_base_url} "
         f"map={config.junction_map} strategy={config.direction_strategy}"
     )
-    adapter = SignalVisionAdapter(config)
     producer = make_producer(bootstrap_servers=args.bootstrap)
+    world_client = build_signalvision_adapter_world_client(config, bootstrap=args.bootstrap, producer=producer)
+    adapter = SignalVisionAdapter(config, world_client=world_client)
 
     # 注册（lifecycle）。
     publish(producer, TrafficTopics.AGENT_LIFECYCLE, lifecycle_envelope(agent_id=config.agent_id, registered=True))
+    world_client.register()
     producer.flush()
     print("[sv-adapter] 已注册（lifecycle registered）")
 
@@ -89,9 +92,11 @@ def main() -> int:
                 TrafficTopics.AGENT_LIFECYCLE,
                 lifecycle_envelope(agent_id=config.agent_id, registered=False),
             )
+            world_client.deregister()
             producer.flush()
             print("[sv-adapter] 已下线（lifecycle deregistered）")
         finally:
+            world_client.close()
             producer.close()
     return 0
 

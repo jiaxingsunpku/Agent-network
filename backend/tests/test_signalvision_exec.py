@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from anp import contracts as c
 from anp.adapters.signalvision import (
     SV_EXEC_AGENT_ID,
+    SignalVisionClient,
     SignalVisionExecConfig,
     SignalVisionExecutor,
     SvResponse,
@@ -236,6 +237,25 @@ def test_inference_start_completed_calls_sv_start():
         "sv_response": {"success": True, "pid": 4321},
         "params": {"action": "start", "algorithm": "maxpressure"},
     }
+
+
+def test_signalvision_client_start_requests_subprocess_mode():
+    class CapturingClient(SignalVisionClient):
+        def __init__(self):
+            super().__init__("http://sv.test")
+            self.last_post = None
+
+        def _post(self, path, body):
+            self.last_post = (path, body)
+            return SvResponse(ok=True, status_code=200, body={"success": True, "pid": 4321})
+
+    client = CapturingClient()
+    resp = client.start_simulation("maxpressure")
+    assert resp.ok
+    assert client.last_post == (
+        "/api/simulation/start",
+        {"config": "maxpressure", "execution_mode": "subprocess"},
+    )
 
 
 def test_inference_stop_completed_calls_sv_stop():

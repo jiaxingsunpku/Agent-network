@@ -140,13 +140,15 @@ class SignalVisionClient:
 
     # -- 仿真控制端点（control_signal_inference：启停信号控制算法）------------ #
     def start_simulation(self, config: str) -> SvResponse:
-        """``POST /api/simulation/start {"config": <algorithm>}`` 起信号控制算法仿真（真驱动 SUMO）。
+        """``POST /api/simulation/start`` 起信号控制算法仿真（真驱动 SUMO）。
 
+        ANP 过渡期显式请求 SV 的 subprocess 模式：SV 集成模式在部分地图上会秒退，
+        subprocess 模式能让运行态被 ``/api/simulation/status`` 稳定观测。
         SV 成功返回 ``{"success": true, "pid": ...}``；已在运行等情形返回 ``success=False``
         （归一为 ``ok=False`` → 执行端回 FAILED）。
         """
 
-        resp = self._post("/api/simulation/start", {"config": config})
+        resp = self._post("/api/simulation/start", {"config": config, "execution_mode": "subprocess"})
         if resp.ok and not resp.body.get("success", True):
             return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
         return resp

@@ -72,13 +72,18 @@ class Registry:
         ts = now or _utcnow()
         with self._lock:
             existing = self._agents.get(agent_id)
+            # Transition readers consume both world lifecycle and older traffic lifecycle.
+            # Older traffic records may carry empty channel lists, so an empty
+            # update must not erase a richer world registration for the same agent.
+            next_produces = list(produces) if produces else (existing.produces if existing else [])
+            next_consumes = list(consumes) if consumes else (existing.consumes if existing else [])
             record = AgentRecord(
                 agent_id=agent_id,
                 agent_type=agent_type,
                 capabilities=list(capabilities or []),
                 command_types=list(command_types or []),
-                produces=list(produces) if produces is not None else (existing.produces if existing else []),
-                consumes=list(consumes) if consumes is not None else (existing.consumes if existing else []),
+                produces=next_produces,
+                consumes=next_consumes,
                 weight=weight if weight is not None else (existing.weight if existing else 1.0),
                 members=list(members) if members is not None else (existing.members if existing else []),
                 registered_at=existing.registered_at if existing else ts,

@@ -58,11 +58,14 @@ class SignalVisionAdapter:
         config: SignalVisionAdapterConfig | None = None,
         *,
         client: SignalVisionClient | None = None,
+        world_client=None,
     ) -> None:
         self.config = config or SignalVisionAdapterConfig()
         self.client = client or SignalVisionClient(
             self.config.sv_base_url, timeout_sec=self.config.http_timeout_sec
         )
+        # Transition: mirror traffic heartbeat to world heartbeat when configured.
+        self.world_client = world_client
         self._seq = SequenceGenerator()
         #: 每 junction 上一轮累计通过量，用于差分出本间隔通过量。
         self._prev_passed: dict[str, int] = {}
@@ -117,6 +120,8 @@ class SignalVisionAdapter:
             sequence=self._seq.next(),
         )
         publish(producer, TrafficTopics.AGENT_HEARTBEAT, env)
+        if self.world_client is not None:
+            self.world_client.heartbeat(status=status, last_error=last_error)
 
     # -- 一轮：取 status（心跳）+ 各 junction detail（观测）-------------- #
     def poll_once(self, producer, *, event_ts: str | None = None) -> PollResult:

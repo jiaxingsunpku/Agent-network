@@ -137,10 +137,15 @@ registry 已提供（`backend/anp/registry/registry.py`）：`catalog_by_topic()
 
 ## 3. 交通组的接下来任务
 
-1. **把 SV 感知 adapter / 信号执行体迁到 `WorldClient`**：现在它们往**老交通** lifecycle 报到
-   （`adapters/signalvision/service.py`、`executor.py`、`run_signalvision_*.py`）。改成用 `WorldClient` 报到世界级
-   topic，并**声明 per-key 通道**（`keys=[各 junction/intersection_id]`）。过渡期双读，**不迁也不消失**，但迁了才进
-   per-key catalog、才算世界公民。
+1. **把 SV 感知 adapter / 信号执行体迁到 `WorldClient`**：✅ 当前已落地**过渡双注册层**。
+   `run_signalvision_adapter.py` / `run_signalvision_exec.py` 仍保留老 `anp.traffic.agent.*` lifecycle/heartbeat，
+   同时通过 `backend/anp/adapters/signalvision/world.py` 构造 `WorldClient` 向 `anp.world.agent.*` 报到。
+   感知体声明 `produces=[Channel(anp.traffic.perception.observation.v1, keys=[intersection_id...])]`；执行体声明
+   `consumes=[Channel(anp.traffic.command.v1, keys=[intersection_id...])]`、`produces=[Channel(anp.traffic.ack.v1)]`，
+   因而已能进入 `/api/agent-network/world` 的 per-key catalog。2026-06-27 已在服务器活体验证：前端 dev server
+   通过 gateway proxy 能看到 `traffic-perception-sv-001` / `traffic-exec-sv-001` 在线，ANP `/commands` 可下发
+   `control_signal_inference{start,maxpressure}` 让 SV status 进入 `running=true`（无 SUMO 环境时走 SV 演示回放兜底）。
+   过渡期双读仍保留，待所有交通/视频 agent 都迁完后再撤老 traffic lifecycle 订阅。
 2. **把交通聚合正式跑成 model**：样板已给（`specs/traffic_system.json` + `run_model.py`，workflow=`system_agent`，
    `SystemAgent` 类零改）。把线上从 `run_system_agent.py` 切到 `run_model.py`（注意：**别同时起两者**，否则同一观测
    被两个 group 各产一份 status，输出翻倍）。

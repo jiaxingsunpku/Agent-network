@@ -39,6 +39,7 @@ from anp.adapters.signalvision import (  # noqa: E402
     SV_EXEC_AGENT_ID,
     SignalVisionExecConfig,
     SignalVisionExecutor,
+    build_signalvision_exec_world_client,
     exec_heartbeat_envelope,
     exec_lifecycle_envelope,
 )
@@ -59,7 +60,7 @@ def _build_config(args: argparse.Namespace) -> SignalVisionExecConfig:
     )
 
 
-def _heartbeat_loop(producer, executor: SignalVisionExecutor, interval: float, stop: threading.Event) -> None:
+def _heartbeat_loop(producer, executor: SignalVisionExecutor, interval: float, stop: threading.Event, world_client=None) -> None:
     seq = SequenceGenerator()
     while not stop.is_set():
         reachable, err = executor.probe_sv()
@@ -72,6 +73,8 @@ def _heartbeat_loop(producer, executor: SignalVisionExecutor, interval: float, s
             ),
             flush=True,
         )
+        if world_client is not None:
+            world_client.heartbeat(status=status, last_error=err)
         stop.wait(interval)
 
 
@@ -132,18 +135,20 @@ def main() -> int:
     print(f"[sv-exec] agent_id={config.agent_id} sv={config.sv_base_url} map={config.junction_map}")
 
     lifecycle_producer = make_producer(bootstrap_servers=args.bootstrap)
+    world_client = build_signalvision_exec_world_client(config, bootstrap=args.bootstrap, producer=lifecycle_producer)
     publish(
         lifecycle_producer,
         TrafficTopics.AGENT_LIFECYCLE,
         exec_lifecycle_envelope(agent_id=config.agent_id, registered=True),
         flush=True,
     )
+    world_client.register()
     print(f"[sv-exec] 已注册 {config.agent_id}（exec, command_types={list(EXEC_COMMAND_TYPES)}）")
 
     stop = threading.Event()
     hb_thread = threading.Thread(
         target=_heartbeat_loop,
-        args=(lifecycle_producer, executor, config.heartbeat_interval_sec, stop),
+        args=(lifecycle_producer, executor, config.heartbeat_interval_sec, stop, world_client),
         name="sv-exec-heartbeat",
         daemon=True,
     )
@@ -167,8 +172,10 @@ def main() -> int:
                 exec_lifecycle_envelope(agent_id=config.agent_id, registered=False),
                 flush=True,
             )
+            world_client.deregister()
             print(f"[sv-exec] 已下线 {config.agent_id}")
         finally:
+            world_client.close()
             lifecycle_producer.close()
     return 0
 
