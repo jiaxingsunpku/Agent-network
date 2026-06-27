@@ -138,7 +138,7 @@ function isVisionHubEdgeNode(node: AgentNode) {
 const COMMAND_PAYLOAD_TEMPLATES: Record<string, { label: string; payload: Record<string, unknown>; expiresInSec?: number }> = {
   set_signal_plan: { label: "信号计划", payload: { desired_phase: "north_south_green", duration_s: 25 } },
   control_signal_inference: { label: "启动推理", payload: { action: "start", algorithm: "maxpressure" }, expiresInSec: 60 },
-  set_signal_map: { label: "切换路网", payload: { map_path: "guanggu/netdata.pkl" }, expiresInSec: 60 },
+  set_signal_map: { label: "切换路网", payload: { map_path: "output/netdata.pkl" }, expiresInSec: 60 },
   set_observation_rate: { label: "观测频率", payload: { interval_sec: 2 } },
   enter_maintenance_demo: { label: "维护演示", payload: { maintenance_mode: "demo_only" } },
   "sv.inference.status": { label: "SV 状态", payload: {} },

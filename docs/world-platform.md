@@ -116,7 +116,7 @@ stop.set(); wc.deregister(); wc.close()
 - 跑：`python backend/scripts/run_model.py --spec specs/your_model.json`。model 启动时**走同一套注册
   流程自注册成一个 agent**（`agent_type="model"`，并把 `member_agent_ids` 作为 `members` 自报进世界），
   一 model 一 consumer group 跑 workflow。所以它一启动就出现在世界名册 + 左侧「自发现 model 列表」，
-  并带上「它管辖谁」——前端据此高亮成员、画治理边。
+  并带上「它管辖谁」——前端据此高亮成员、画治理边。显式成员只是 bootstrap hint；网关 `/world` 会按 model 的 topic 边界和 agent 自注册的 topic/key 自动推导扩展成员，因此 SV 感知体、SV 执行体上线后会自动归入交通控制 model。
 - **自定义 workflow**：实现一个带 `feed_record(value)`（+可选 `flush()`）的对象，在 `run_model.py::_build_workflow`
   里注册名字，或直接用 `ModelRuntime(spec, workflow=你的对象, bootstrap=...)`。
 

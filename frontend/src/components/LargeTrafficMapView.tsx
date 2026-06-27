@@ -195,22 +195,57 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
     [snapshot]
   );
 
-  // junction id → 驻留其上的 agent（按通道 key 匹配）。世界总览叠加层用。
+  // junction id → 驻留其上的 agent。优先按通道 key 精确匹配地图节点；过渡期
+  // SV 真实图的 junction id 可能是数字，而 ANP 通道 key 是平台 intersection id，
+  // 此时按同一实体 key 稳定落到一个可见锚点，保证注册/归属在 model 图中可见。
   const agentsByJunction = useMemo(() => {
     const map = new Map<string, WorldAgent[]>();
+    const knownIds = new Set((data?.intersections ?? []).map((inter) => inter.id));
+    const unmatched: { agent: WorldAgent; entityKey: string }[] = [];
+    const add = (junctionId: string, agent: WorldAgent) => {
+      const arr = map.get(junctionId) ?? [];
+      if (!arr.includes(agent)) arr.push(agent);
+      map.set(junctionId, arr);
+    };
+
     for (const agent of worldAgents ?? []) {
+      if (agent.agentType === "model") continue;
       const keys = new Set<string>();
       for (const ch of [...(agent.produces ?? []), ...(agent.consumes ?? [])]) {
         for (const k of ch.keys) keys.add(k);
       }
+      if (agent.location?.entity) keys.add(agent.location.entity);
+
+      let attached = false;
       for (const k of keys) {
-        const arr = map.get(k) ?? [];
-        if (!arr.includes(agent)) arr.push(agent);
-        map.set(k, arr);
+        if (knownIds.has(k)) {
+          add(k, agent);
+          attached = true;
+        }
+      }
+      if (!attached) unmatched.push({ agent, entityKey: [...keys][0] ?? agent.id });
+    }
+
+    const anchors = (data?.intersections ?? []).filter((inter) => inter.hasTrafficLight);
+    const fallbackAnchors = anchors.length ? anchors : (data?.intersections ?? []);
+    if (fallbackAnchors.length && data) {
+      const centerX = data.bounds.minX + (data.bounds.maxX - data.bounds.minX) * 0.5;
+      const centerY = data.bounds.minY + (data.bounds.maxY - data.bounds.minY) * 0.5;
+      const stableAnchors = [...fallbackAnchors]
+        .sort((a, b) => Math.hypot(a.x - centerX, a.y - centerY) - Math.hypot(b.x - centerX, b.y - centerY))
+        .slice(0, Math.max(1, Math.min(24, fallbackAnchors.length)));
+      const anchorByEntity = new Map<string, string>();
+      for (const item of unmatched) {
+        if (!anchorByEntity.has(item.entityKey)) {
+          const anchor = stableAnchors[numericSeed(item.entityKey) % stableAnchors.length];
+          anchorByEntity.set(item.entityKey, anchor.id);
+        }
+        add(anchorByEntity.get(item.entityKey)!, item.agent);
       }
     }
+
     return map;
-  }, [worldAgents]);
+  }, [data, worldAgents]);
 
   // 重取真实 SV 路网几何并重绘（切图后轮询用）。返回新路口数（不可达=null），供校验几何是否真的变了。
   const reloadSvNetwork = useCallback(async () => {

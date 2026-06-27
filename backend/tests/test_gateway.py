@@ -113,6 +113,43 @@ def test_world_endpoint_agents_models_catalog():
     assert "leaf-1" in body["catalog"][TrafficTopics.OBSERVATION]["producers"]
 
 
+def test_world_endpoint_derives_model_members_from_registered_channels():
+    reg = Registry()
+    reg.register(
+        agent_id="traffic-perception-sv-001",
+        agent_type="signalvision",
+        capabilities=["perception"],
+        produces=[Channel(topic=TrafficTopics.OBSERVATION, keys=["gg-xiongchu-minzu"])],
+    )
+    reg.register(
+        agent_id="traffic-exec-sv-001",
+        agent_type="signalvision",
+        capabilities=["exec"],
+        command_types=["control_signal_inference"],
+        consumes=[Channel(topic=TrafficTopics.COMMAND, keys=["gg-xiongchu-minzu"])],
+        produces=[Channel(topic=TrafficTopics.ACK)],
+    )
+    reg.register(
+        agent_id="m-traffic",
+        agent_type="model",
+        capabilities=["model"],
+        # No SV ids here: model ownership must be inferred from topic/key contracts.
+        members=[],
+        produces=[Channel(topic=TrafficTopics.STATUS_INTERSECTION)],
+        consumes=[Channel(topic=TrafficTopics.OBSERVATION)],
+    )
+
+    state = GatewayState(config=GatewayConfig(with_consumers=False), registry=reg, producer=FakeProducer())
+    body = _client(state).get("/api/agent-network/world").json()
+
+    model = {m["model_id"]: m for m in body["models"]}["m-traffic"]
+    assert model["members"] == ["traffic-perception-sv-001", "traffic-exec-sv-001"]
+
+    agents = {a["id"]: a for a in body["agents"]}
+    assert agents["traffic-perception-sv-001"]["governed_by"] == ["m-traffic"]
+    assert agents["traffic-exec-sv-001"]["governed_by"] == ["m-traffic"]
+
+
 # --------------------------------------------------------------------------- #
 # snapshot
 # --------------------------------------------------------------------------- #

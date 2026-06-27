@@ -683,6 +683,104 @@ def _channel_dicts(channels: list) -> list[dict]:
     return [{"topic": ch.topic, "keys": list(ch.keys)} for ch in channels]
 
 
+def _topic_domain(topic: str) -> str:
+    """Return the ANP domain segment from ``anp.<domain>...`` topics."""
+
+    parts = topic.split(".")
+    if len(parts) < 3 or parts[0] != "anp":
+        return ""
+    return parts[1]
+
+
+def _produced_topics(record: AgentRecord) -> set[str]:
+    return {ch.topic for ch in record.produces}
+
+
+def _consumed_topics(record: AgentRecord) -> set[str]:
+    return {ch.topic for ch in record.consumes}
+
+
+def _record_topics(record: AgentRecord) -> set[str]:
+    return _produced_topics(record) | _consumed_topics(record)
+
+
+def _record_keys(record: AgentRecord) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for ch in [*record.produces, *record.consumes]:
+        for key in ch.keys:
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def _add_member(out: list[str], record: AgentRecord) -> None:
+    if record.agent_id not in out:
+        out.append(record.agent_id)
+
+
+def _derive_model_members(records: list[AgentRecord]) -> dict[str, list[str]]:
+    """Infer model membership from registered channel contracts.
+
+    Explicit ``members`` declared by a model remain valid bootstrap hints, but a
+    model should not need to know every adapter id in advance. The derived
+    membership therefore uses the model's topic boundary as the primary signal:
+
+    - an agent producing a topic consumed by the model is a member;
+    - an agent consuming a topic produced by the model is a member;
+    - agents in the same ANP domain that share an entity key with those direct
+      members join the same model. This covers paired perception/exec agents:
+      SV perception enters through observation, SV exec enters through the same
+      intersection key on the command topic.
+    """
+
+    by_id = {rec.agent_id: rec for rec in records}
+    leaf_records = [rec for rec in records if rec.agent_type != "model"]
+    model_records = [rec for rec in records if rec.agent_type == "model"]
+    derived: dict[str, list[str]] = {}
+
+    for model in model_records:
+        members: list[str] = []
+
+        for member_id in model.members:
+            rec = by_id.get(member_id)
+            if rec is not None and rec.agent_type != "model":
+                _add_member(members, rec)
+
+        model_consumes = _consumed_topics(model)
+        model_produces = _produced_topics(model)
+        model_topics = model_consumes | model_produces
+        model_domains = {domain for domain in (_topic_domain(t) for t in model_topics) if domain}
+
+        for rec in leaf_records:
+            if _produced_topics(rec) & model_consumes or _consumed_topics(rec) & model_produces:
+                _add_member(members, rec)
+
+        member_keys: set[str] = set()
+        for member_id in members:
+            rec = by_id.get(member_id)
+            if rec is not None:
+                member_keys.update(_record_keys(rec))
+
+        if member_keys:
+            for rec in leaf_records:
+                if rec.agent_id in members:
+                    continue
+                rec_keys = set(_record_keys(rec))
+                if not rec_keys or rec_keys.isdisjoint(member_keys):
+                    continue
+                rec_domains = {domain for domain in (_topic_domain(t) for t in _record_topics(rec)) if domain}
+                if model_domains and rec_domains and rec_domains.isdisjoint(model_domains):
+                    continue
+                _add_member(members, rec)
+
+        derived[model.agent_id] = members
+
+    return derived
+
+
 def build_world(state, now: datetime | None = None) -> dict:
     """统一世界只读视图：跨域 agent（含位置/通道/归属 model）+ model（含成员）+ catalog。
 
@@ -693,6 +791,7 @@ def build_world(state, now: datetime | None = None) -> dict:
     registry: Registry = state.registry
     topology: Topology = state.topology
     records = registry.all()
+    model_members = _derive_model_members(records)
 
     agents = [
         {
@@ -705,7 +804,7 @@ def build_world(state, now: datetime | None = None) -> dict:
             "produces": _channel_dicts(rec.produces),
             "consumes": _channel_dicts(rec.consumes),
             "location": _agent_world_location(rec, topology),  # None = 非地理公民
-            "governed_by": registry.governed_by(rec.agent_id),
+            "governed_by": [mid for mid, members in model_members.items() if rec.agent_id in members],
         }
         for rec in records
     ]
@@ -714,7 +813,7 @@ def build_world(state, now: datetime | None = None) -> dict:
         {
             "model_id": rec.agent_id,
             "status": _AGENT_STATUS_MAP[rec.derived_status(now)],
-            "members": list(rec.members),
+            "members": list(model_members.get(rec.agent_id, rec.members)),
             "produce_topics": [ch.topic for ch in rec.produces],
             "subscribe_topics": [ch.topic for ch in rec.consumes],
             "weight": rec.weight,
