@@ -150,6 +150,81 @@ def test_world_endpoint_derives_model_members_from_registered_channels():
     assert agents["traffic-exec-sv-001"]["governed_by"] == ["m-traffic"]
 
 
+def test_registration_endpoint_accepts_custom_profile_and_updates_world():
+    reg = Registry()
+    reg.register(
+        agent_id="m-traffic",
+        agent_type="model",
+        capabilities=["model"],
+        members=[],
+        produces=[Channel(topic=TrafficTopics.STATUS_INTERSECTION)],
+        consumes=[Channel(topic=TrafficTopics.OBSERVATION)],
+    )
+    producer = FakeProducer()
+    state = GatewayState(config=GatewayConfig(with_consumers=False), registry=reg, producer=producer)
+    client = _client(state)
+
+    resp = client.post(
+        "/api/agent-network/registrations",
+        json={
+            "source": "custom-adapter",
+            "target_model_id": "m-traffic",
+            "agents": [
+                {
+                    "agent_id": "custom-perception-001",
+                    "agent_type": "custom-adapter",
+                    "capabilities": ["perception"],
+                    "produces": [{"topic": TrafficTopics.OBSERVATION, "keys": ["gg-xiongchu-minzu"]}],
+                    "status": "online",
+                },
+                {
+                    "agent_id": "custom-exec-001",
+                    "agent_type": "custom-adapter",
+                    "capabilities": ["exec"],
+                    "command_types": ["control_signal_inference"],
+                    "consumes": [{"topic": TrafficTopics.COMMAND, "keys": ["gg-xiongchu-minzu"]}],
+                    "produces": [{"topic": TrafficTopics.ACK, "keys": ["gg-xiongchu-minzu"]}],
+                    "status": "online",
+                },
+            ],
+        },
+    )
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["ok"] and body["persistence"] == "world_topics"
+    assert body["registered"] == ["custom-perception-001", "custom-exec-001"]
+    assert len(producer.sent) == 4
+
+    world = body["world"]
+    model = {m["model_id"]: m for m in world["models"]}["m-traffic"]
+    assert model["members"] == ["custom-perception-001", "custom-exec-001"]
+    agents = {a["id"]: a for a in world["agents"]}
+    assert agents["custom-perception-001"]["status"] == "online"
+    assert agents["custom-exec-001"]["governed_by"] == ["m-traffic"]
+    assert "custom-perception-001" in world["catalog"][TrafficTopics.OBSERVATION]["producers"]
+
+
+def test_registration_endpoint_can_update_registry_without_producer():
+    state = GatewayState(config=GatewayConfig(with_consumers=False), registry=Registry(), producer=None)
+    resp = _client(state).post(
+        "/api/agent-network/registrations",
+        json={
+            "agents": [
+                {
+                    "agent_id": "manual-agent-001",
+                    "agent_type": "manual",
+                    "capabilities": ["perception"],
+                    "produces": [{"topic": TrafficTopics.OBSERVATION, "keys": ["gg-xiongchu-minzu"]}],
+                }
+            ]
+        },
+    )
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["persistence"] == "registry_only"
+    assert state.registry.get("manual-agent-001") is not None
+
+
 # --------------------------------------------------------------------------- #
 # snapshot
 # --------------------------------------------------------------------------- #

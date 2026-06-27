@@ -99,6 +99,47 @@
 
 网关**不伪造 ack**。命令是否被执行端接受，由前端订阅/查询 ack 反映（v1 可在 projection 的命令闭环 tab 展示最近 ack）。
 
+## 3a. POST /api/agent-network/registrations
+
+操作台自定义接入智能体。它服务于“外部系统暂时不能嵌 `WorldClient`”的过渡层：请求体描述一个或多个 agent 的世界注册声明，网关按同一套 world lifecycle/heartbeat 语义写入。
+
+请求体：
+
+```jsonc
+{
+  "source": "signalvision",
+  "target_model_id": "traffic-control",
+  "agents": [
+    {
+      "agent_id": "traffic-perception-sv-001",
+      "agent_type": "signalvision",
+      "capabilities": ["perception"],
+      "command_types": [],
+      "produces": [{ "topic": "anp.traffic.perception.observation.v1", "keys": ["gg-xiongchu-minzu"] }],
+      "consumes": [],
+      "weight": 0.92,
+      "status": "online"
+    }
+  ]
+}
+```
+
+语义：
+- 需要 admin token（鉴权开启时），与 `/commands` 同级写权限。
+- `agent_id`、`agent_type`、`agents[]` 必填；`produces/consumes` 是 `Channel{topic, keys[]}`。
+- 网关有 Kafka producer 时，先向 `anp.world.agent.lifecycle.v1` 发布 `AGENT_REGISTERED`，再向 `anp.world.agent.heartbeat.v1` 发布 `AGENT_HEARTBEAT`，partition key 仍是 `agent_id`；随后刷新本地 registry。
+- 无 producer 的开发态仍刷新本地 registry，但响应 `persistence="registry_only"`，重启不保证保留。
+- `target_model_id` 是操作台上下文，不直接伪造成员关系；模型归属仍由 `/world` 根据 model topic 边界和 agent topic/key 声明推导。
+
+成功 `200`：
+
+```jsonc
+{ "ok": true, "source": "signalvision", "target_model_id": "traffic-control",
+  "registered": ["traffic-perception-sv-001"], "persistence": "world_topics", "world": { /* /world 当前视图 */ } }
+```
+
+错误：`400 invalid_body|invalid_registration`，`401 unauthorized`，`500 registration_publish_failed`。
+
 ## 4. POST /api/agent-network/edge-inference（本期可选）
 
 前端 `runEdgeInference` 会调用。v1 仅对声明 inference 能力的 agent 生效；交通虚拟体不支持时返回结构化错误，前端按钮显示失败、不崩主界面：

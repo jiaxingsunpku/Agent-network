@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
-import { Map as MapIcon, Network, Cpu, CircleDot } from "lucide-react";
-import { WorldAgent, WorldChannel, WorldView } from "../api/agentNetworkClient";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { AlertCircle, CheckCircle2, Map as MapIcon, Network, Cpu, CircleDot, Plus, X } from "lucide-react";
+import { registerWorldAgents, WorldAgent, WorldChannel, WorldView, type WorldRegistrationAgentInput } from "../api/agentNetworkClient";
 import { LargeTrafficMapView } from "./LargeTrafficMapView";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -22,6 +22,166 @@ function statusZh(s: string): string {
 function channelText(chs: WorldChannel[]): string {
   if (!chs.length) return "—";
   return chs.map((c) => c.topic + (c.keys.length ? ` [${c.keys.join(", ")}]` : "")).join("；");
+}
+
+function registrationTemplate(targetModelId: string): string {
+  return JSON.stringify({
+    source: "signalvision",
+    target_model_id: targetModelId || "traffic-control",
+    agents: [
+      {
+        agent_id: "traffic-perception-sv-001",
+        agent_type: "signalvision",
+        capabilities: ["perception", "traffic-observation"],
+        command_types: [],
+        produces: [
+          { topic: "anp.traffic.perception.observation.v1", keys: ["gg-xiongchu-minzu"] }
+        ],
+        consumes: [],
+        weight: 0.92,
+        status: "online"
+      },
+      {
+        agent_id: "traffic-exec-sv-001",
+        agent_type: "signalvision",
+        capabilities: ["exec", "signal-control"],
+        command_types: ["set_signal_plan", "control_signal_inference", "set_signal_map"],
+        produces: [
+          { topic: "anp.traffic.ack.v1", keys: ["gg-xiongchu-minzu"] }
+        ],
+        consumes: [
+          { topic: "anp.traffic.command.v1", keys: ["gg-xiongchu-minzu"] }
+        ],
+        weight: 0.96,
+        status: "online"
+      }
+    ]
+  }, null, 2);
+}
+
+function RegistrationPanel({
+  world,
+  focusModelId,
+  onClose
+}: {
+  world: WorldView;
+  focusModelId?: string | null;
+  onClose: () => void;
+}) {
+  const initialModelId = focusModelId || world.models[0]?.modelId || "";
+  const [targetModelId, setTargetModelId] = useState(initialModelId);
+  const [registrationText, setRegistrationText] = useState(() => registrationTemplate(initialModelId));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const parsed = JSON.parse(registrationText) as Record<string, unknown>;
+      const agents = parsed.agents;
+      if (!Array.isArray(agents) || agents.length === 0) {
+        throw new Error("注册声明必须包含非空 agents 数组");
+      }
+      const target = targetModelId.trim() || (typeof parsed.target_model_id === "string" ? parsed.target_model_id : "");
+      const resp = await registerWorldAgents({
+        source: typeof parsed.source === "string" ? parsed.source : undefined,
+        target_model_id: target || undefined,
+        agents: agents as WorldRegistrationAgentInput[]
+      });
+      window.dispatchEvent(new Event("anp-world-refresh"));
+      setSuccess(`${resp.registered.join("、")} 已接入；${resp.persistence === "world_topics" ? "已同步世界生命周期 topic" : "已写入当前网关 registry"}`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="自定义接入智能体"
+      style={{
+        position: "absolute", inset: 0, zIndex: 20, display: "grid", placeItems: "center",
+        background: "rgba(12, 20, 35, 0.32)", padding: 18
+      }}
+    >
+      <form
+        onSubmit={submit}
+        style={{
+          width: "min(820px, 96%)", maxHeight: "calc(100% - 24px)", overflow: "auto", background: "#fff",
+          color: "#172033", border: "0.5px solid rgba(0,0,0,0.16)", borderRadius: 12,
+          boxShadow: "0 18px 50px rgba(15,23,42,0.28)", padding: "18px 20px", display: "grid", gap: 14
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(55,138,221,0.14)", color: "#2563eb", display: "grid", placeItems: "center" }}>
+            <Plus size={20} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <strong style={{ fontSize: 18 }}>自定义接入智能体</strong>
+            <div style={{ fontSize: 12, opacity: 0.62, marginTop: 2 }}>按世界协议声明 agent、能力、命令和 topic/key 覆盖范围。</div>
+          </div>
+          <button type="button" onClick={onClose} title="关闭" style={{ border: "none", background: "transparent", cursor: "pointer", color: "inherit", padding: 6 }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700 }}>
+          目标模型
+          <input
+            value={targetModelId}
+            onChange={(event) => setTargetModelId(event.target.value)}
+            list="world-registration-models"
+            placeholder="traffic-control"
+            style={{ height: 38, border: "1px solid rgba(100,116,139,0.28)", borderRadius: 8, padding: "0 10px", fontSize: 14, color: "inherit" }}
+          />
+          <datalist id="world-registration-models">
+            {world.models.map((model) => <option key={model.modelId} value={model.modelId} />)}
+          </datalist>
+        </label>
+
+        <label style={{ display: "grid", gap: 6, fontSize: 12, fontWeight: 700 }}>
+          注册声明 JSON
+          <textarea
+            value={registrationText}
+            onChange={(event) => setRegistrationText(event.target.value)}
+            spellCheck={false}
+            style={{
+              minHeight: 330, resize: "vertical", border: "1px solid rgba(100,116,139,0.28)", borderRadius: 8,
+              padding: 12, fontSize: 12, lineHeight: 1.55, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+              color: "#0f172a", background: "#fbfdff"
+            }}
+          />
+        </label>
+
+        {error && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#b42318", background: "rgba(244,63,94,0.08)", border: "1px solid rgba(244,63,94,0.2)", borderRadius: 8, padding: "9px 10px" }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+        {success && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#067647", background: "rgba(22,163,74,0.08)", border: "1px solid rgba(22,163,74,0.2)", borderRadius: 8, padding: "9px 10px" }}>
+            <CheckCircle2 size={15} /> {success}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button type="button" onClick={onClose} style={{ height: 38, border: "1px solid rgba(100,116,139,0.28)", background: "#fff", borderRadius: 8, padding: "0 14px", cursor: "pointer", color: "inherit" }}>
+            关闭
+          </button>
+          <button type="submit" disabled={busy} style={{ height: 38, border: "none", background: busy ? "#93a8d8" : "#2563eb", color: "#fff", borderRadius: 8, padding: "0 16px", cursor: busy ? "wait" : "pointer", fontWeight: 700 }}>
+            {busy ? "接入中" : "验证并接入"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
 
 function StatusDot({ status }: { status: string }) {
@@ -179,6 +339,7 @@ export function WorldOverview({
 }) {
   const [view, setView] = useState<"map" | "topology">("map");
   const [selectedAgent, setSelectedAgent] = useState<WorldAgent | null>(null);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
 
   if (!world) {
     return (
@@ -194,7 +355,7 @@ export function WorldOverview({
   const memberIds = focusModel ? focusModel.members : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "4px 2px", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "4px 2px", minHeight: 0, position: "relative" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
         <strong style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
           <CircleDot size={16} /> {focusModel ? `model · ${focusModel.modelId}` : "世界总览"}
@@ -208,6 +369,11 @@ export function WorldOverview({
             {controlOpen ? "关闭控制台" : "控制台"}
           </button>
         )}
+        <button type="button" onClick={() => setRegistrationOpen(true)}
+          style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, padding: "4px 10px", borderRadius: 8, cursor: "pointer", color: "#2563eb",
+            border: "0.5px solid rgba(37,99,235,0.45)", background: "rgba(37,99,235,0.08)", fontWeight: 700 }}>
+          <Plus size={14} /> 接入智能体
+        </button>
         <div style={{ marginLeft: "auto", display: "inline-flex", border: "0.5px solid rgba(128,128,128,0.4)", borderRadius: 8, overflow: "hidden" }}>
           <button type="button" onClick={() => setView("map")}
             style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", fontSize: 12, border: "none", cursor: "pointer", background: view === "map" ? "rgba(55,138,221,0.18)" : "transparent", color: "inherit" }}>
@@ -241,6 +407,7 @@ export function WorldOverview({
           <TopologyView world={world} onSelectModel={onSelectModel} />
         )}
       </div>
+      {registrationOpen && <RegistrationPanel world={world} focusModelId={focusModel?.modelId ?? focusModelId} onClose={() => setRegistrationOpen(false)} />}
     </div>
   );
 }

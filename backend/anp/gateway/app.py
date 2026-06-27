@@ -13,7 +13,19 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, ValidationError
 
+from ..contracts import (
+    AgentHeartbeatPayload,
+    AgentLifecyclePayload,
+    Channel,
+    EventType,
+    Source,
+    SourceSystem,
+    WorldTopics,
+    make_envelope,
+)
+from ..messaging import publish
 from . import mapping
 from .commands import CommandValidationError, build_command_envelope
 from .config import GatewayConfig
@@ -21,6 +33,89 @@ from .models import CommandResponse, CommandTarget
 from .state import GatewayState, PublishFailed, PublishUnavailable
 
 API_PREFIX = "/api/agent-network"
+
+
+class RegistrationChannelIn(BaseModel):
+    """Operator supplied channel declaration for a world registration profile."""
+
+    topic: str = Field(min_length=1)
+    keys: list[str] = Field(default_factory=list)
+
+
+class RegistrationAgentIn(BaseModel):
+    """One agent declaration in an operator-managed registration profile."""
+
+    agent_id: str = Field(min_length=1)
+    agent_type: str = Field(min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    command_types: list[str] = Field(default_factory=list)
+    produces: list[RegistrationChannelIn] = Field(default_factory=list)
+    consumes: list[RegistrationChannelIn] = Field(default_factory=list)
+    weight: float = Field(default=1.0, ge=0.0)
+    members: list[str] = Field(default_factory=list)
+    status: str = Field(default="online", min_length=1)
+    last_error: str | None = None
+
+
+class AgentRegistrationRequest(BaseModel):
+    """Custom world registration profile submitted from the operator console.
+
+    The target model is advisory: model ownership is still derived from the
+    registered topic/key contracts so the frontend cannot fake affiliation.
+    """
+
+    source: str | None = None
+    target_model_id: str | None = None
+    agents: list[RegistrationAgentIn] = Field(min_length=1)
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _channels(channels: list[RegistrationChannelIn]) -> list[Channel]:
+    return [Channel(topic=ch.topic.strip(), keys=_dedupe(ch.keys)) for ch in channels]
+
+
+def _world_source(agent_id: str) -> Source:
+    # Use the registered agent id as the partition key so compacted lifecycle
+    # topics retain one latest record per agent even when submitted by an admin.
+    return Source(system=SourceSystem.PLATFORM, agent_id=agent_id, gateway_id="anp-gateway")
+
+
+def _registration_envelopes(agent: RegistrationAgentIn, produces: list[Channel], consumes: list[Channel]):
+    source = _world_source(agent.agent_id)
+    lifecycle = make_envelope(
+        event_type=EventType.AGENT_REGISTERED,
+        source=source,
+        payload=AgentLifecyclePayload(
+            agent_id=agent.agent_id,
+            agent_type=agent.agent_type,
+            capabilities=_dedupe(agent.capabilities),
+            command_types=_dedupe(agent.command_types),
+            produces=produces,
+            consumes=consumes,
+            weight=agent.weight,
+            members=_dedupe(agent.members),
+        ),
+    )
+    heartbeat = make_envelope(
+        event_type=EventType.AGENT_HEARTBEAT,
+        source=source,
+        payload=AgentHeartbeatPayload(status=agent.status, last_error=agent.last_error),
+    )
+    return (
+        (WorldTopics.AGENT_LIFECYCLE, lifecycle),
+        (WorldTopics.AGENT_HEARTBEAT, heartbeat),
+    )
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
@@ -126,6 +221,67 @@ def create_app(state: GatewayState | None = None) -> FastAPI:
             return _error(503, "sv_unreachable", f"SignalVision 地图列表不可达: {resp.body.get('message', '')}")
         maps = resp.body.get("maps") if isinstance(resp.body.get("maps"), list) else []
         return JSONResponse(content={"ok": True, "maps": maps, "count": len(maps)})
+
+    # -- 写：registrations（操作台自定义接入世界智能体）--------------------- #
+    @app.post(API_PREFIX + "/registrations")
+    async def post_registration(request: Request) -> JSONResponse:
+        denied = require_admin(request)
+        if denied:
+            return denied
+        try:
+            raw = await request.json()
+        except Exception:  # noqa: BLE001
+            return _error(400, "invalid_body", "请求体不是合法 JSON")
+        try:
+            req = AgentRegistrationRequest.model_validate(raw)
+        except ValidationError as exc:
+            return _error(400, "invalid_registration", exc.errors()[0].get("msg", "注册声明不合法"))
+
+        prepared: list[tuple[RegistrationAgentIn, list[Channel], list[Channel]]] = []
+        for agent in req.agents:
+            prepared.append((agent, _channels(agent.produces), _channels(agent.consumes)))
+
+        persistence = "registry_only"
+        if state.producer is not None:
+            try:
+                for agent, produces, consumes in prepared:
+                    for topic, env in _registration_envelopes(agent, produces, consumes):
+                        future = publish(state.producer, topic, env, flush=True)
+                        future.get(timeout=5.0)
+                persistence = "world_topics"
+            except Exception as exc:  # noqa: BLE001 - kafka-python 异常类型较散
+                return _error(500, "registration_publish_failed", str(exc))
+
+        now = state.now()
+        for agent, produces, consumes in prepared:
+            state.registry.register(
+                agent_id=agent.agent_id,
+                agent_type=agent.agent_type,
+                capabilities=_dedupe(agent.capabilities),
+                command_types=_dedupe(agent.command_types),
+                produces=produces,
+                consumes=consumes,
+                weight=agent.weight,
+                members=_dedupe(agent.members),
+                now=now,
+            )
+            state.registry.heartbeat(
+                agent_id=agent.agent_id,
+                status=agent.status,
+                last_error=agent.last_error,
+                now=now,
+            )
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "source": req.source,
+                "target_model_id": req.target_model_id,
+                "registered": [agent.agent_id for agent, _, _ in prepared],
+                "persistence": persistence,
+                "world": mapping.build_world(state),
+            }
+        )
 
     # -- 写：commands ----------------------------------------------------- #
     @app.post(API_PREFIX + "/commands")

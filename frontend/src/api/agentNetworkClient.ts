@@ -199,6 +199,15 @@ function normalizeWorldModel(raw: any): WorldModel {
   };
 }
 
+function normalizeWorldView(data: any): WorldView {
+  return {
+    generatedAt: camel(data.generatedAt ?? data.generated_at, new Date().toISOString()),
+    agents: Array.isArray(data.agents) ? data.agents.map(normalizeWorldAgent) : [],
+    models: Array.isArray(data.models) ? data.models.map(normalizeWorldModel) : [],
+    catalog: (data.catalog ?? {}) as Record<string, WorldCatalogEntry>
+  };
+}
+
 /** 统一世界（网关 /world）。不可达/未启用时返回 null（前端回落）。 */
 export async function fetchWorld(): Promise<WorldView | null> {
   try {
@@ -207,15 +216,61 @@ export async function fetchWorld(): Promise<WorldView | null> {
     if (!response.headers.get("content-type")?.includes("application/json")) return null;
     const data = await response.json();
     if (!Array.isArray(data?.agents)) return null;
-    return {
-      generatedAt: camel(data.generatedAt ?? data.generated_at, new Date().toISOString()),
-      agents: data.agents.map(normalizeWorldAgent),
-      models: Array.isArray(data.models) ? data.models.map(normalizeWorldModel) : [],
-      catalog: (data.catalog ?? {}) as Record<string, WorldCatalogEntry>
-    };
+    return normalizeWorldView(data);
   } catch {
     return null;
   }
+}
+
+export interface WorldRegistrationAgentInput {
+  agent_id: string;
+  agent_type: string;
+  capabilities?: string[];
+  command_types?: string[];
+  produces?: WorldChannel[];
+  consumes?: WorldChannel[];
+  weight?: number;
+  members?: string[];
+  status?: string;
+  last_error?: string | null;
+}
+
+export interface WorldRegistrationRequest {
+  source?: string;
+  target_model_id?: string | null;
+  agents: WorldRegistrationAgentInput[];
+}
+
+export interface WorldRegistrationResponse {
+  ok: boolean;
+  source?: string | null;
+  target_model_id?: string | null;
+  registered: string[];
+  persistence: "world_topics" | "registry_only" | string;
+  world?: WorldView;
+}
+
+export async function registerWorldAgents(request: WorldRegistrationRequest): Promise<WorldRegistrationResponse> {
+  const response = await fetchAgentNetwork("/registrations", {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(request)
+  });
+  const data = response.headers.get("content-type")?.includes("application/json")
+    ? await response.json()
+    : null;
+  if (!response.ok || !data?.ok) {
+    const message = data?.error?.message ?? `HTTP ${response.status}`;
+    throw new Error(String(message));
+  }
+  return {
+    ...(data as WorldRegistrationResponse),
+    world: data.world ? normalizeWorldView(data.world) : undefined
+  };
 }
 
 export interface SvNetworkJunction {

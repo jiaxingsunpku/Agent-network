@@ -87,6 +87,14 @@ stop.set(); wc.deregister(); wc.close()
 
 最小写法见上面的代码片段：给它 id + 通道，`register()` + `start_heartbeat()` 即进世界。
 
+**操作台代管接入（过渡层）**：如果某个外部系统暂时不能在自身进程里嵌 `WorldClient`，平台操作台可调用
+`POST /api/agent-network/registrations` 提交同一套注册声明（`agent_id` / `agent_type` / `capabilities` /
+`command_types` / `produces` / `consumes` / `weight`）。网关有 Kafka producer 时会把声明写入
+`anp.world.agent.lifecycle.v1` 和 `anp.world.agent.heartbeat.v1`，同时刷新本地 registry；无 producer 的开发态只写
+当前 registry，响应标记 `persistence="registry_only"`。这不是写死 SignalVision 的演示入口，而是 operator-managed
+adapter profile：`target_model_id` 只表达接入意图/校验上下文，真正归属仍由 model 的 topic 边界与 agent 的 topic/key
+声明自动推导，前端不能手动伪造高亮。能改代码的 agent 仍优先使用 `WorldClient` 自注册。
+
 ### 2.2 数据 / 命令 / ack 契约（已有，别另造）
 
 - **造 envelope** 一律走 `anp.contracts` 的 builder：`observation_envelope` / `video_text_envelope` /

@@ -21,9 +21,11 @@ export function useWorld(enabled: boolean): WorldView | null {
     };
     load();
     const id = window.setInterval(load, 3000);
+    window.addEventListener("anp-world-refresh", load);
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      window.removeEventListener("anp-world-refresh", load);
     };
   }, [enabled]);
 
