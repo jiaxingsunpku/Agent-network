@@ -296,25 +296,34 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      // 先尝试真实 SV 路网（网关 /sv-network relay SV /api/network）；不可达再回落静态演示图。
-      const geo = await fetchSvNetwork();
-      if (cancelled) return;
-      if (geo) {
-        setData(svGeometryToMapData(geo));
-        onSvNetworkChange?.(geo);
-        return;
-      }
+    let liveMapLoaded = false;
+
+    const loadStaticBaseMap = async () => {
       try {
         const response = await fetch(MAP_URL, { cache: "force-cache" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = (await response.json()) as LargeTrafficMapData;
-        if (!cancelled) setData(payload);
+        if (!cancelled && !liveMapLoaded) {
+          setData(payload);
+          setError("");
+        }
       } catch (reason) {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+        if (!cancelled && !liveMapLoaded) setError(reason instanceof Error ? reason.message : String(reason));
       }
     };
-    load();
+
+    const loadLiveMap = async () => {
+      // SV 几何可能慢或不可达；静态底图不应因此空白等待。
+      const geo = await fetchSvNetwork();
+      if (cancelled || !geo) return;
+      liveMapLoaded = true;
+      setData(svGeometryToMapData(geo));
+      setError("");
+      onSvNetworkChange?.(geo);
+    };
+
+    loadStaticBaseMap();
+    loadLiveMap();
     return () => {
       cancelled = true;
     };
@@ -419,6 +428,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
     const rect = canvas.getBoundingClientRect();
     const width = data.bounds.maxX - data.bounds.minX;
     const height = data.bounds.maxY - data.bounds.minY;
+    if (rect.width <= 0 || rect.height <= 0 || width <= 0 || height <= 0) return;
     const realFit = data.source === "signalvision"; // 真实 SV 路网较小较密 → 居中铺满，不像大演示图那样放大裁切
     const fitScale = Math.min((rect.width - 100) / width, (rect.height - 90) / height);
     const scale = fitScale * (realFit ? 0.9 : 2.08);
