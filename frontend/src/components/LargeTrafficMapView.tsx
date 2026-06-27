@@ -11,6 +11,30 @@ import {
 } from "../api/agentNetworkClient";
 
 const AGENT_RING = "#7f77dd"; // 驻留 agent 的路口标记色（紫）
+const AGENT_MARKER_COLORS = {
+  signalvisionPerception: "#0ea66f",
+  signalvisionExec: "#2563eb",
+  virtual: "#7c3aed",
+  system: "#64748b",
+  default: AGENT_RING
+};
+
+function agentMarkerColor(agent: WorldAgent): string {
+  if (agent.agentType === "signalvision" && agent.capabilities.includes("exec")) return AGENT_MARKER_COLORS.signalvisionExec;
+  if (agent.agentType === "signalvision") return AGENT_MARKER_COLORS.signalvisionPerception;
+  if (agent.agentType === "virtual") return AGENT_MARKER_COLORS.virtual;
+  if (agent.agentType === "system") return AGENT_MARKER_COLORS.system;
+  return AGENT_MARKER_COLORS.default;
+}
+
+function agentMarkerLabel(agent: WorldAgent): string {
+  if (agent.agentType === "signalvision" && agent.capabilities.includes("exec")) return "SV执行";
+  if (agent.agentType === "signalvision") return "SV感知";
+  if (agent.agentType === "virtual") return "虚拟体";
+  if (agent.agentType === "system") return "系统体";
+  return agent.agentType;
+}
+
 
 function statusZh(status: string): string {
   return { online: "在线", warning: "降级", degraded: "降级", offline: "离线", syncing: "同步" }[status] ?? status;
@@ -234,13 +258,20 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
       const stableAnchors = [...fallbackAnchors]
         .sort((a, b) => Math.hypot(a.x - centerX, a.y - centerY) - Math.hypot(b.x - centerX, b.y - centerY))
         .slice(0, Math.max(1, Math.min(24, fallbackAnchors.length)));
-      const anchorByEntity = new Map<string, string>();
+      const unmatchedByEntity = new Map<string, { agent: WorldAgent; entityKey: string }[]>();
       for (const item of unmatched) {
-        if (!anchorByEntity.has(item.entityKey)) {
-          const anchor = stableAnchors[numericSeed(item.entityKey) % stableAnchors.length];
-          anchorByEntity.set(item.entityKey, anchor.id);
-        }
-        add(anchorByEntity.get(item.entityKey)!, item.agent);
+        const group = unmatchedByEntity.get(item.entityKey) ?? [];
+        group.push(item);
+        unmatchedByEntity.set(item.entityKey, group);
+      }
+      for (const [entityKey, group] of unmatchedByEntity) {
+        const ordered = [...group].sort((a, b) => a.agent.id.localeCompare(b.agent.id));
+        const base = numericSeed(entityKey) % stableAnchors.length;
+        const step = Math.max(1, Math.floor(stableAnchors.length / Math.max(1, ordered.length)));
+        ordered.forEach((item, index) => {
+          const anchor = stableAnchors[(base + index * step) % stableAnchors.length];
+          add(anchor.id, item.agent);
+        });
       }
     }
 
@@ -531,18 +562,32 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
 
       if (agentsByJunction.has(inter.id)) {
         const ags = agentsByJunction.get(inter.id)!;
-        const agentSelected = !!selectedAgentId && ags.some((a) => a.id === selectedAgentId);
-        const inFocus = !focusAgentIds || ags.some((a) => focusAgentIds.includes(a.id));
-        ctx.globalAlpha = inFocus ? 1 : 0.22;
-        ctx.strokeStyle = agentSelected ? "#2563eb" : AGENT_RING;
+        const focusSet = focusAgentIds ? new Set(focusAgentIds) : null;
+        const visibleAgents = focusSet ? ags.filter((agent) => focusSet.has(agent.id)) : ags;
+        const displayAgent = visibleAgents[0] ?? ags[0];
+        const agentSelected = !!selectedAgentId && ags.some((agent) => agent.id === selectedAgentId);
+        const inFocus = !focusSet || visibleAgents.length > 0;
+        const markerColor = displayAgent ? agentMarkerColor(displayAgent) : AGENT_RING;
+        ctx.globalAlpha = inFocus ? 1 : 0.18;
+        ctx.strokeStyle = agentSelected ? "#2563eb" : markerColor;
         ctx.lineWidth = agentSelected ? 3.2 : 2.4;
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius + 6, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = AGENT_RING;
+        ctx.fillStyle = markerColor;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2);
         ctx.fill();
+        if (displayAgent && inFocus && agentMode) {
+          const text = agentMarkerLabel(displayAgent);
+          ctx.font = "700 11px Inter, Microsoft YaHei, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#172033";
+          ctx.strokeStyle = "rgba(255,255,255,.94)";
+          ctx.lineWidth = 4;
+          ctx.strokeText(text, p.x, p.y + radius + 18);
+          ctx.fillText(text, p.x, p.y + radius + 18);
+        }
         ctx.globalAlpha = 1;
       }
 
@@ -642,8 +687,9 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         const hit = hitTest(p.x, p.y);
         if (agentMode) {
           if (hit?.kind === "intersection") {
-            const ags = agentsByJunction.get(hit.id);
-            onAgentSelect?.(ags && ags.length ? ags[0] : null);
+            const ags = agentsByJunction.get(hit.id) ?? [];
+            const preferred = ags.find((agent) => agent.commandTypes.length > 0) ?? ags[0] ?? null;
+            onAgentSelect?.(preferred);
           } else {
             onAgentSelect?.(null);
           }
