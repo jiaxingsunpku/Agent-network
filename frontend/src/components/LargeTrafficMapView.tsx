@@ -11,50 +11,6 @@ import {
 } from "../api/agentNetworkClient";
 
 const AGENT_RING = "#7f77dd"; // 驻留 agent 的路口标记色（紫）
-const AGENT_COLORS = {
-  signalvisionPerception: "#0ea66f",
-  signalvisionExec: "#2563eb",
-  virtual: "#7c3aed",
-  system: "#64748b",
-  default: AGENT_RING
-};
-
-function agentColor(agent: WorldAgent): string {
-  if (agent.agentType === "signalvision" && agent.capabilities.includes("exec")) return AGENT_COLORS.signalvisionExec;
-  if (agent.agentType === "signalvision") return AGENT_COLORS.signalvisionPerception;
-  if (agent.agentType === "virtual") return AGENT_COLORS.virtual;
-  if (agent.agentType === "system") return AGENT_COLORS.system;
-  return AGENT_COLORS.default;
-}
-
-function agentRoleLabel(agent: WorldAgent): string {
-  if (agent.agentType === "signalvision" && agent.capabilities.includes("exec")) return "SV执行";
-  if (agent.agentType === "signalvision") return "SV感知";
-  if (agent.agentType === "virtual") return "虚拟体";
-  if (agent.agentType === "system") return "系统体";
-  return agent.agentType;
-}
-
-function agentClusterLabel(agents: WorldAgent[]): string {
-  if (agents.length <= 1) return agents[0] ? `1 智能体 · ${agentRoleLabel(agents[0])}` : "0 智能体";
-  const svCount = agents.filter((agent) => agent.agentType === "signalvision").length;
-  return svCount > 0 ? `${agents.length} 智能体 · SV ${svCount}` : `${agents.length} 智能体`;
-}
-
-function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + w - radius, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-  ctx.lineTo(x + w, y + h - radius);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-  ctx.lineTo(x + radius, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
 
 function statusZh(status: string): string {
   return { online: "在线", warning: "降级", degraded: "降级", offline: "离线", syncing: "同步" }[status] ?? status;
@@ -575,60 +531,18 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
 
       if (agentsByJunction.has(inter.id)) {
         const ags = agentsByJunction.get(inter.id)!;
-        const focusSet = focusAgentIds ? new Set(focusAgentIds) : null;
-        const visibleAgents = focusSet ? ags.filter((agent) => focusSet.has(agent.id)) : ags;
-        const displayAgents = visibleAgents.length ? visibleAgents : ags;
-        const agentSelected = !!selectedAgentId && ags.some((agent) => agent.id === selectedAgentId);
-        const inFocus = !focusSet || visibleAgents.length > 0;
-        const clusterAlpha = inFocus ? 1 : 0.18;
-        const clusterRadius = radius + 10 + Math.min(8, displayAgents.length * 1.4);
-
-        ctx.globalAlpha = clusterAlpha * 0.18;
-        ctx.fillStyle = agentSelected ? "#2563eb" : AGENT_RING;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, clusterRadius + 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.globalAlpha = clusterAlpha;
+        const agentSelected = !!selectedAgentId && ags.some((a) => a.id === selectedAgentId);
+        const inFocus = !focusAgentIds || ags.some((a) => focusAgentIds.includes(a.id));
+        ctx.globalAlpha = inFocus ? 1 : 0.22;
         ctx.strokeStyle = agentSelected ? "#2563eb" : AGENT_RING;
-        ctx.lineWidth = agentSelected ? 3.3 : 2.8;
+        ctx.lineWidth = agentSelected ? 3.2 : 2.4;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, clusterRadius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, radius + 6, 0, Math.PI * 2);
         ctx.stroke();
-
-        const dots = displayAgents.slice(0, 6);
-        const dotRadius = displayAgents.length > 1 ? 4.7 : 4.3;
-        dots.forEach((agent, index) => {
-          const angle = -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(1, dots.length);
-          const dx = Math.cos(angle) * clusterRadius;
-          const dy = Math.sin(angle) * clusterRadius;
-          ctx.fillStyle = agentColor(agent);
-          ctx.strokeStyle = "rgba(255,255,255,.92)";
-          ctx.lineWidth = 1.8;
-          ctx.beginPath();
-          ctx.arc(p.x + dx, p.y + dy, dotRadius, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        });
-
-        const label = agentClusterLabel(displayAgents);
-        ctx.font = "700 12px Inter, Microsoft YaHei, sans-serif";
-        const pillW = Math.max(86, ctx.measureText(label).width + 24);
-        const pillH = 26;
-        const preferredX = p.x + clusterRadius + 10;
-        const pillX = Math.max(8, Math.min(width - pillW - 8, preferredX));
-        const pillY = Math.max(8, Math.min(height - pillH - 8, p.y - clusterRadius - 34));
-
-        ctx.globalAlpha = clusterAlpha;
-        ctx.strokeStyle = inFocus ? "rgba(127,119,221,.72)" : "rgba(100,116,139,.28)";
-        ctx.fillStyle = "rgba(255,255,255,.96)";
-        ctx.lineWidth = 1.4;
-        roundedRect(ctx, pillX, pillY, pillW, pillH, 9);
+        ctx.fillStyle = AGENT_RING;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = inFocus ? "#172033" : "rgba(51,65,85,.66)";
-        ctx.textAlign = "left";
-        ctx.fillText(label, pillX + 12, pillY + 17);
         ctx.globalAlpha = 1;
       }
 
@@ -728,12 +642,8 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         const hit = hitTest(p.x, p.y);
         if (agentMode) {
           if (hit?.kind === "intersection") {
-            const ags = agentsByJunction.get(hit.id) ?? [];
-            const focusSet = focusAgentIds ? new Set(focusAgentIds) : null;
-            const visibleAgents = focusSet ? ags.filter((agent) => focusSet.has(agent.id)) : ags;
-            const candidates = visibleAgents.length ? visibleAgents : ags;
-            const preferred = candidates.find((agent) => agent.commandTypes.length > 0) ?? candidates[0] ?? null;
-            onAgentSelect?.(preferred);
+            const ags = agentsByJunction.get(hit.id);
+            onAgentSelect?.(ags && ags.length ? ags[0] : null);
           } else {
             onAgentSelect?.(null);
           }
@@ -770,7 +680,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
       canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", onResize);
     };
-  }, [agentMode, agentsByJunction, data, draw, focusAgentIds, hitTest, onAgentSelect, resetView, screenToWorld]);
+  }, [agentMode, agentsByJunction, data, draw, hitTest, onAgentSelect, resetView, screenToWorld]);
 
   const zoom = (factor: number) => {
     const canvas = canvasRef.current;
