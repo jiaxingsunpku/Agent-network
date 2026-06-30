@@ -34,7 +34,14 @@ def _build_workflow(name: str, *, producer, status_topic: str | None):
         if status_topic:
             kwargs["status_topic"] = status_topic
         return SystemAgent(**kwargs)
-    raise SystemExit(f"未知 workflow: {name!r}（今天仅支持 'system_agent'）")
+    if name == "passthrough":  # task5：观测→最小整形→状态 topic（第一步占位）
+        from anp.system_agent.passthrough import PassthroughWorkflow
+
+        kwargs = {"producer": producer}
+        if status_topic:
+            kwargs["status_topic"] = status_topic
+        return PassthroughWorkflow(**kwargs)
+    raise SystemExit(f"未知 workflow: {name!r}（支持 'system_agent' / 'passthrough'）")
 
 
 def main() -> int:

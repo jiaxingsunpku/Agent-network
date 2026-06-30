@@ -1,0 +1,60 @@
+{
+  "additionalProperties": false,
+  "description": "控制层相位注入（task5，topic anp.traffic.control.phase.v1）。\n\n执行体（决策外置）算出某路口的目标相位 index，下发给 SV 写灯口注入运行中 SUMO。\n异步语义：写灯口用最近一条未过期相位覆盖内置算法，过期（``based_on_sim_step`` 落后过多）\n回落内置算法。phase_index 合法性（``∈[0, 路口相位数-1]``）由 SV 写灯口本地 Safety Guard 校验。",
+  "properties": {
+    "control_type": {
+      "const": "signal.phase",
+      "default": "signal.phase",
+      "title": "Control Type",
+      "type": "string"
+    },
+    "intersection_id": {
+      "minLength": 1,
+      "title": "Intersection Id",
+      "type": "string"
+    },
+    "phase_index": {
+      "minimum": 0,
+      "title": "Phase Index",
+      "type": "integer"
+    },
+    "based_on_sim_step": {
+      "minimum": 0,
+      "title": "Based On Sim Step",
+      "type": "integer"
+    },
+    "based_on_sim_time": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Based On Sim Time"
+    },
+    "based_on_event_ts": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Based On Event Ts"
+    }
+  },
+  "required": [
+    "intersection_id",
+    "phase_index",
+    "based_on_sim_step"
+  ],
+  "title": "控制层相位注入 payload（task5，docs/protocol.md §5）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

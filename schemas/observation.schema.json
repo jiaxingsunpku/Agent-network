@@ -55,6 +55,28 @@
       ],
       "title": "Direction",
       "type": "string"
+    },
+    "SimClock": {
+      "additionalProperties": false,
+      "description": "仿真时钟（task5 双时间戳地基）：边缘仿真器(SUMO)的自有时钟，与 envelope.time.event_ts\n(挂钟)并存，作为异步控制回路的对齐/过期判据。完整的世界-边缘时钟同步留作未来一等公民问题。",
+      "properties": {
+        "sim_time": {
+          "minimum": 0,
+          "title": "Sim Time",
+          "type": "number"
+        },
+        "sim_step": {
+          "minimum": 0,
+          "title": "Sim Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sim_time",
+        "sim_step"
+      ],
+      "title": "SimClock",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -77,6 +99,17 @@
       "minItems": 1,
       "title": "Approaches",
       "type": "array"
+    },
+    "sim_clock": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SimClock"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

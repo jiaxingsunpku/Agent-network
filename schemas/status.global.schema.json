@@ -1,0 +1,76 @@
+{
+  "$defs": {
+    "SimClock": {
+      "additionalProperties": false,
+      "description": "仿真时钟（task5 双时间戳地基）：边缘仿真器(SUMO)的自有时钟，与 envelope.time.event_ts\n(挂钟)并存，作为异步控制回路的对齐/过期判据。完整的世界-边缘时钟同步留作未来一等公民问题。",
+      "properties": {
+        "sim_time": {
+          "minimum": 0,
+          "title": "Sim Time",
+          "type": "number"
+        },
+        "sim_step": {
+          "minimum": 0,
+          "title": "Sim Step",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sim_time",
+        "sim_step"
+      ],
+      "title": "SimClock",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "交通域全局总览（task5 P-10，topic anp.traffic.status.global.v1）。\n\n系统级 model 聚合所有路口观测产出的**共识指标**（路口数/车辆/等待/均速）；SV 仿真元信息\n（算法/步数/运行状态）不在此，由 SV host 经心跳 ``metadata`` 带、网关合并（保持「共识由系统级算」）。",
+  "properties": {
+    "status_type": {
+      "const": "traffic.global",
+      "default": "traffic.global",
+      "title": "Status Type",
+      "type": "string"
+    },
+    "junction_count": {
+      "minimum": 0,
+      "title": "Junction Count",
+      "type": "integer"
+    },
+    "total_vehicles": {
+      "minimum": 0,
+      "title": "Total Vehicles",
+      "type": "integer"
+    },
+    "total_halting": {
+      "minimum": 0,
+      "title": "Total Halting",
+      "type": "integer"
+    },
+    "mean_speed_kmh": {
+      "minimum": 0,
+      "title": "Mean Speed Kmh",
+      "type": "number"
+    },
+    "sim_clock": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SimClock"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "junction_count",
+    "total_vehicles",
+    "total_halting",
+    "mean_speed_kmh"
+  ],
+  "title": "交通域全局总览 payload（task5 P-10）",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

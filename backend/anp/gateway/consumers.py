@@ -17,10 +17,13 @@ from pydantic import ValidationError
 
 from ..contracts import (
     AckPayload,
+    AgentHeartbeatPayload,
     Envelope,
     EventType,
+    GlobalTrafficStatusPayload,
     IntersectionStatusPayload,
     TrafficTopics,
+    WorldTopics,
     parse_payload,
 )
 from ..messaging import make_consumer
@@ -84,8 +87,33 @@ class _AckConsumer:
             self.applied += 1
 
 
+class _GlobalConsumer:
+    """global 总览 + SV host 心跳 metadata → state.latest_global / sv_meta（task5 P-10）。"""
+
+    def __init__(self, state: GatewayState) -> None:
+        self.state = state
+        self.applied = 0
+
+    def run(self, consumer) -> None:
+        for record in consumer:
+            try:
+                env = Envelope.model_validate(record.value)
+                if env.event_type == EventType.STATUS_TRAFFIC_GLOBAL:
+                    payload = parse_payload(env)
+                    assert isinstance(payload, GlobalTrafficStatusPayload)
+                    self.state.set_global(payload)
+                    self.applied += 1
+                elif env.event_type == EventType.AGENT_HEARTBEAT and "sv-host" in env.source.agent_id:
+                    payload = parse_payload(env)
+                    assert isinstance(payload, AgentHeartbeatPayload)
+                    if payload.metadata:
+                        self.state.set_sv_meta(payload.metadata)
+            except (ValidationError, AssertionError):
+                continue
+
+
 class GatewayConsumers:
-    """启动并持有网关三类后台消费线程。"""
+    """启动并持有网关后台消费线程。"""
 
     def __init__(self, state: GatewayState) -> None:
         self.state = state
@@ -94,6 +122,7 @@ class GatewayConsumers:
         self._closing = False
         self.status = _StatusConsumer(state)
         self.ack = _AckConsumer(state)
+        self.global_c = _GlobalConsumer(state)
         # lifecycle 与 heartbeat 分开消费（不同 offset 策略），共享同一 registry。
         self.registry_lc = RegistryConsumer(state.registry)
         self.registry_hb = RegistryConsumer(state.registry)
@@ -122,6 +151,12 @@ class GatewayConsumers:
             bootstrap_servers=bootstrap,
             auto_offset_reset="latest",
         )
+        global_consumer = make_consumer(
+            [TrafficTopics.STATUS_GLOBAL, WorldTopics.AGENT_HEARTBEAT],  # 全局共识 + SV host 元信息
+            group_id=f"anp-gateway-global-{os.getpid()}",
+            bootstrap_servers=bootstrap,
+            auto_offset_reset="latest",
+        )
         # Registry 读模型是内存态；每次 gateway 启动都应该从 compacted world lifecycle
         # 重新构建名册，不能复用旧消费组位置。heartbeat 也用临时组，只读启动后的新心跳。
         registry_group_suffix = os.getpid()
@@ -137,11 +172,12 @@ class GatewayConsumers:
             bootstrap_servers=bootstrap,
             auto_offset_reset="latest",  # 只读当前心跳，跳过历史积压（不然 live 误判离线）
         )
-        self._consumers = [status_consumer, ack_consumer, registry_lc_consumer, registry_hb_consumer]
+        self._consumers = [status_consumer, ack_consumer, global_consumer, registry_lc_consumer, registry_hb_consumer]
 
         for name, svc, consumer in (
             ("status", self.status, status_consumer),
             ("ack", self.ack, ack_consumer),
+            ("global", self.global_c, global_consumer),
             ("registry-lc", self.registry_lc, registry_lc_consumer),
             ("registry-hb", self.registry_hb, registry_hb_consumer),
         ):

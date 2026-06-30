@@ -16,6 +16,7 @@ from anp.contracts import (
     ApproachStatus,
     CongestionLevel,
     Direction,
+    GlobalTrafficStatusPayload,
     IntersectionStatusPayload,
     StatusWindow,
     iso_utc,
@@ -72,6 +73,33 @@ def _make_state(*, producer=None, config: GatewayConfig | None = None) -> Gatewa
 
 def _client(state: GatewayState) -> TestClient:
     return TestClient(create_app(state))
+
+
+def test_overview_sanitizes_sv_metadata_and_expires_running_flag():
+    state = GatewayState(config=GatewayConfig(with_consumers=False), registry=seed_default_registry())
+    state.set_global(
+        GlobalTrafficStatusPayload(
+            junction_count=69,
+            total_vehicles=258,
+            total_halting=243,
+            mean_speed_kmh=4.6,
+        )
+    )
+    state.set_sv_meta({"algorithm": "maxpressure", "sim_step": "1098", "total_steps": "3600", "running": True})
+
+    body = _client(state).get("/api/agent-network/overview").json()
+    assert body["ok"]
+    assert body["junction_count"] == 69
+    assert body["sim_step"] == 1098
+    assert body["total_steps"] == 3600
+    assert body["running"] is True
+
+    state.set_sv_meta({"algorithm": "maxpressure", "sim_step": 5000, "total_steps": 3600, "running": True})
+    state.sv_meta_ts = state.now() - timedelta(seconds=16)
+
+    body = _client(state).get("/api/agent-network/overview").json()
+    assert body["sim_step"] == 3600
+    assert body["running"] is False
 
 
 def test_world_endpoint_agents_models_catalog():

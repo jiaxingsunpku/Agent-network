@@ -34,9 +34,11 @@ from .envelope import (
     new_trace_id,
     now_iso,
     parse_iso,
+    global_status_envelope,
     observation_envelope,
     parse_payload,
     partition_key,
+    signal_phase_envelope,
     status_envelope,
     video_text_envelope,
 )
@@ -48,11 +50,20 @@ from .payloads import (
     ApproachStatus,
     Channel,
     CommandPayload,
+    GlobalTrafficStatusPayload,
     IntersectionStatusPayload,
     ObservationPayload,
     SafetyDecision,
+    SignalPhasePayload,
+    SimClock,
     StatusWindow,
     VideoTextEventPayload,
+)
+from .clock import (
+    DEFAULT_MAX_AGE_SEC,
+    age_seconds,
+    is_fresh,
+    now_utc,
 )
 from .topics import (
     ALL_TRAFFIC_TOPICS,
@@ -97,6 +108,8 @@ __all__ = [
     "make_envelope",
     "observation_envelope",
     "status_envelope",
+    "global_status_envelope",
+    "signal_phase_envelope",
     "video_text_envelope",
     "command_envelope",
     "ack_envelope",
@@ -105,7 +118,10 @@ __all__ = [
     # payloads
     "ObservationPayload",
     "Approach",
+    "SimClock",
+    "SignalPhasePayload",
     "IntersectionStatusPayload",
+    "GlobalTrafficStatusPayload",
     "StatusWindow",
     "ApproachStatus",
     "VideoTextEventPayload",
@@ -126,4 +142,9 @@ __all__ = [
     "ALL_VIDEO_TOPICS",
     "WorldTopics",
     "ALL_WORLD_TOPICS",
+    # 世界时钟 v1（统一挂钟时基 + 新鲜度工具）
+    "DEFAULT_MAX_AGE_SEC",
+    "age_seconds",
+    "is_fresh",
+    "now_utc",
 ]

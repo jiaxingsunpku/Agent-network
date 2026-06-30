@@ -139,16 +139,20 @@ class SignalVisionClient:
         return resp
 
     # -- 仿真控制端点（control_signal_inference：启停信号控制算法）------------ #
-    def start_simulation(self, config: str) -> SvResponse:
+    def start_simulation(self, config: str, step_delay: float = 0.05) -> SvResponse:
         """``POST /api/simulation/start`` 起信号控制算法仿真（真驱动 SUMO）。
 
-        ANP 过渡期显式请求 SV 的 subprocess 模式：SV 集成模式在部分地图上会秒退，
-        subprocess 模式能让运行态被 ``/api/simulation/status`` 稳定观测。
-        SV 成功返回 ``{"success": true, "pid": ...}``；已在运行等情形返回 ``success=False``
-        （归一为 ``ok=False`` → 执行端回 FAILED）。
+        task5：用 **集成模式**（``DashboardController``）启动——这才是 task5 感知/注入链路
+        （per-junction 观测上行 + 控制层相位注入回写 SUMO）所在；subprocess 模式是独立 run.py
+        子进程、不接 ANP 链路（且当前 run.py 有 argparse bug 会秒退），故弃用。``step_delay`` 放慢
+        SUMO 步进让异步注入不过期（见 tasks/task5 P-7 调参）。SV 成功返回 ``{"success": true, "pid": ...}``；
+        已在运行等情形返回 ``success=False``（归一为 ``ok=False`` → 执行端回 FAILED）。
         """
 
-        resp = self._post("/api/simulation/start", {"config": config, "execution_mode": "subprocess"})
+        resp = self._post(
+            "/api/simulation/start",
+            {"config": config, "execution_mode": "integration", "step_delay": step_delay},
+        )
         if resp.ok and not resp.body.get("success", True):
             return SvResponse(ok=False, status_code=resp.status_code, body=resp.body)
         return resp

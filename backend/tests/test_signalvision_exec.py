@@ -239,7 +239,8 @@ def test_inference_start_completed_calls_sv_start():
     }
 
 
-def test_signalvision_client_start_requests_subprocess_mode():
+def test_signalvision_client_start_requests_integration_mode():
+    # task5：start_simulation 用集成模式（DashboardController）+ step_delay，才接 ANP 感知/注入链路。
     class CapturingClient(SignalVisionClient):
         def __init__(self):
             super().__init__("http://sv.test")
@@ -254,7 +255,7 @@ def test_signalvision_client_start_requests_subprocess_mode():
     assert resp.ok
     assert client.last_post == (
         "/api/simulation/start",
-        {"config": "maxpressure", "execution_mode": "subprocess"},
+        {"config": "maxpressure", "execution_mode": "integration", "step_delay": 0.05},
     )
 
 

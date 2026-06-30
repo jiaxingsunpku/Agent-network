@@ -9,16 +9,35 @@ import { worldModels } from "./data/worldModels";
 import { useSimulatedSnapshot } from "./hooks/useSimulatedSnapshot";
 import { useWorld } from "./hooks/useWorld";
 import { AgentNode, SelectionRef } from "./types";
+import type { WorldView } from "./api/agentNetworkClient";
 
 // 发现的 model_id → 前端展示（人类标签 + TopBar 用的富 worldModel 上下文）。
 // 新增 model 在此登记即可；未登记的用 model_id 作标签。
 const MODEL_LABEL: Record<string, string> = { "traffic-control": "交通信号管控" };
 const MODEL_TO_RICH: Record<string, string> = { "traffic-control": "wm-smart-signal" };
 
-function nodeHasCommands(node: AgentNode): boolean {
+function nodeCommandTypes(node: AgentNode): string[] {
   const metrics = node.metrics as Record<string, unknown>;
   const raw = metrics.commandTypes ?? metrics.command_types;
-  return Array.isArray(raw) && raw.length > 0;
+  return Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+}
+
+function nodeHasCommands(node: AgentNode): boolean {
+  return nodeCommandTypes(node).length > 0;
+}
+
+function pickCommandTarget(nodes: AgentNode[], selectedModelId: string, world: WorldView | null): AgentNode | null {
+  const modelMembers = new Set(world?.models.find((m) => m.modelId === selectedModelId)?.members ?? []);
+  const commandNodes = nodes.filter((node) => node.nodeType === "agent" && nodeHasCommands(node));
+  const scopedNodes = modelMembers.size ? commandNodes.filter((node) => modelMembers.has(node.id)) : commandNodes;
+  const candidates = scopedNodes.length ? scopedNodes : commandNodes;
+  return (
+    candidates.find((node) => node.status === "online" && nodeCommandTypes(node).includes("control_signal_inference")) ??
+    candidates.find((node) => nodeCommandTypes(node).includes("control_signal_inference")) ??
+    candidates.find((node) => node.status === "online") ??
+    candidates[0] ??
+    null
+  );
 }
 
 export default function App() {
@@ -72,10 +91,11 @@ export default function App() {
   // 控制台打开但未选节点时，默认选第一个可下发命令的成员。
   useEffect(() => {
     if (!inspectorOn) return;
-    if (selectedId && snapshot.nodes.some((n) => n.id === selectedId)) return;
-    const target = snapshot.nodes.find((n) => n.nodeType === "agent" && nodeHasCommands(n)) ?? snapshot.nodes[0];
+    const current = selectedId ? snapshot.nodes.find((n) => n.id === selectedId) : null;
+    if (current && nodeHasCommands(current)) return;
+    const target = pickCommandTarget(snapshot.nodes, selectedModelId, world);
     setSelectedId(target?.id ?? null);
-  }, [inspectorOn, snapshot.nodes, selectedId]);
+  }, [inspectorOn, selectedId, selectedModelId, snapshot.nodes, world]);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1180px)");
@@ -119,14 +139,16 @@ export default function App() {
               <WorldOverview
                 world={world}
                 focusModelId={selectedModelId}
-                onAgentSelect={setSelectedId}
+                onAgentSelect={(id) => {
+                  if (!controlOpen) setSelectedId(id);
+                }}
                 controlOpen={controlOpen}
                 onToggleControl={() => setControlOpen((v) => !v)}
               />
             )}
           </div>
         </section>
-        {inspectorOn && (
+        {inspectorOn ? (
           <InspectorPanel
             snapshot={snapshot}
             selected={selected}
@@ -135,7 +157,7 @@ export default function App() {
             collapsed={inspectorCollapsed}
             onCollapse={() => setInspectorCollapsed((value) => !value)}
           />
-        )}
+        ) : null}
       </main>
     );
   }

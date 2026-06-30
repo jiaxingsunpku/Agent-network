@@ -29,6 +29,11 @@ class EventType(str, Enum):
 
     OBSERVATION_TRAFFIC_INTERSECTION = "observation.traffic.intersection"
     STATUS_TRAFFIC_INTERSECTION = "status.traffic.intersection"
+    #: task5：控制层相位注入——执行体把 per-junction 目标相位(phase_index)下发给 SV 写灯口，
+    #: 经 anp.traffic.control.phase.v1 异步流转（最近相位覆盖、过期回落内置算法）。
+    CONTROL_TRAFFIC_PHASE = "control.traffic.phase"
+    #: task5 P-10：交通域全局总览（系统级 model 聚合所有路口的共识指标，供 ANP 前端可视化）。
+    STATUS_TRAFFIC_GLOBAL = "status.traffic.global"
     #: P7 视频域：视频大模型处理后的文本事件（docs/video.md）。
     OBSERVATION_VIDEO_TEXT = "observation.video.text"
     COMMAND = "command"

@@ -19,8 +19,10 @@ from .payloads import (
     AgentHeartbeatPayload,
     AgentLifecyclePayload,
     CommandPayload,
+    GlobalTrafficStatusPayload,
     IntersectionStatusPayload,
     ObservationPayload,
+    SignalPhasePayload,
     VideoTextEventPayload,
 )
 
@@ -166,6 +168,8 @@ class Envelope(_Frame):
 _PAYLOAD_BY_EVENT: dict[EventType, type[BaseModel]] = {
     EventType.OBSERVATION_TRAFFIC_INTERSECTION: ObservationPayload,
     EventType.STATUS_TRAFFIC_INTERSECTION: IntersectionStatusPayload,
+    EventType.STATUS_TRAFFIC_GLOBAL: GlobalTrafficStatusPayload,
+    EventType.CONTROL_TRAFFIC_PHASE: SignalPhasePayload,
     EventType.OBSERVATION_VIDEO_TEXT: VideoTextEventPayload,
     EventType.COMMAND: CommandPayload,
     EventType.COMMAND_ACK: AckPayload,
@@ -190,7 +194,7 @@ def partition_key(env: Envelope) -> str:
     状态层按被聚合实体 ``object_id``（intersection_id）切分；其余按 ``source.agent_id``。
     """
 
-    if env.event_type == EventType.STATUS_TRAFFIC_INTERSECTION:
+    if env.event_type in (EventType.STATUS_TRAFFIC_INTERSECTION, EventType.CONTROL_TRAFFIC_PHASE):
         return env.scope.object_id or env.source.agent_id
     return env.source.agent_id
 
@@ -306,6 +310,60 @@ def status_envelope(
     return make_envelope(
         event_type=EventType.STATUS_TRAFFIC_INTERSECTION,
         source=Source(system=SourceSystem.PLATFORM, agent_id=agent_id),
+        payload=payload,
+        scope=Scope(site_id=site_id, region_id=region_id, object_id=payload.intersection_id),
+        event_ts=event_ts,
+        sequence=sequence,
+        trace=trace,
+        message_id=message_id,
+    )
+
+
+def global_status_envelope(
+    *,
+    agent_id: str,
+    payload: GlobalTrafficStatusPayload,
+    event_ts: str | None = None,
+    sequence: int = 0,
+    trace: Trace | None = None,
+    message_id: str | None = None,
+) -> Envelope:
+    """系统级 model 产出交通域全局总览（topic anp.traffic.status.global.v1，task5 P-10）。
+
+    全域单条、不分实体，按 ``source.agent_id`` 分区（走 partition_key 默认分支）。
+    """
+
+    return make_envelope(
+        event_type=EventType.STATUS_TRAFFIC_GLOBAL,
+        source=Source(system=SourceSystem.PLATFORM, agent_id=agent_id),
+        payload=payload,
+        event_ts=event_ts,
+        sequence=sequence,
+        trace=trace,
+        message_id=message_id,
+    )
+
+
+def signal_phase_envelope(
+    *,
+    agent_id: str,
+    payload: SignalPhasePayload,
+    site_id: str | None = None,
+    region_id: str | None = None,
+    event_ts: str | None = None,
+    sequence: int = 0,
+    trace: Trace | None = None,
+    message_id: str | None = None,
+) -> Envelope:
+    """执行体下发控制层相位注入（topic anp.traffic.control.phase.v1，task5）。
+
+    与 status 层对偶：按 ``scope.object_id``(intersection_id) 分区，SV 写灯口按 key 取本路口最新相位。
+    无 ``target_agent_id``（高频机器流，非定向人工命令）；合法性/过期由 SV 写灯口本地判定。
+    """
+
+    return make_envelope(
+        event_type=EventType.CONTROL_TRAFFIC_PHASE,
+        source=Source(system=SourceSystem.COLLABORATIVE_AGENT, agent_id=agent_id),
         payload=payload,
         scope=Scope(site_id=site_id, region_id=region_id, object_id=payload.intersection_id),
         event_ts=event_ts,

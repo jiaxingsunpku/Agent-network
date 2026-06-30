@@ -41,6 +41,7 @@ anp.<domain>.<layer>.<name>.v<major>
 ```
 anp.traffic.perception.observation.v1     # 路口各方向车辆数/滞留/速度等原始观测
 anp.traffic.status.intersection.v1        # 系统级智能体产出的路口 World Status
+anp.traffic.control.phase.v1              # 控制层相位注入（执行体→SV 写灯口，per-junction phase_index，task5）
 anp.traffic.command.v1                    # 下行命令（如信号配时）
 anp.traffic.ack.v1                        # 命令回执
 anp.traffic.agent.lifecycle.v1            # 智能体注册/上下线

@@ -399,9 +399,10 @@ export function WorldOverview({
               }}
               selectedAgentId={selectedAgent?.id ?? null}
               focusAgentIds={memberIds}
+              showOverviewPanel={Boolean(focusModel)}
             />
-            {/* 控制台开时让位给右侧 InspectorPanel 命令闭环；关时显示轻量 agent 详情。 */}
-            {selectedAgent && !controlOpen && <AgentDetailPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} />}
+            {/* agent 详情只反映地图选择；控制台命令目标由 App 独立维护，二者不互相覆盖。 */}
+            {selectedAgent && <AgentDetailPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} />}
           </>
         ) : (
           <TopologyView world={world} onSelectModel={onSelectModel} />

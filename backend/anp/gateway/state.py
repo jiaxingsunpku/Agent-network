@@ -13,9 +13,10 @@ import threading
 from collections import deque
 from datetime import datetime, timezone
 
-from ..contracts import Envelope, TrafficTopics
+from ..contracts import Envelope, GlobalTrafficStatusPayload, TrafficTopics
 from ..messaging import publish
 from ..registry import Registry, seed_default_registry
+from ..registry.constants import HEARTBEAT_ONLINE_TTL_SEC
 from ..system_agent import LatestStatusStore
 from .command_log import CommandLog
 from .config import TREND_CAPACITY, GatewayConfig
@@ -29,6 +30,17 @@ class PublishUnavailable(Exception):
 
 class PublishFailed(Exception):
     """发布过程中 broker 报错 → HTTP 500。"""
+
+
+def _meta_int(value) -> int | None:
+    """Best-effort integer conversion for loose SV heartbeat metadata."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return None
 
 
 class GatewayState:
@@ -54,6 +66,11 @@ class GatewayState:
         self._trend_lock = threading.Lock()
         self._trend: deque[TrendPoint] = deque(maxlen=TREND_CAPACITY)
         self._trend_t = 0
+        # task5 P-10：全局总览（系统级 model 聚合的共识 + SV host 心跳带的仿真元信息）
+        self._overview_lock = threading.Lock()
+        self.latest_global: GlobalTrafficStatusPayload | None = None
+        self.sv_meta: dict = {}
+        self.sv_meta_ts: datetime | None = None
 
     # -- 时间（可被测试覆盖）---------------------------------------------- #
     def now(self) -> datetime:
@@ -68,6 +85,40 @@ class GatewayState:
     def trend(self) -> list[TrendPoint]:
         with self._trend_lock:
             return list(self._trend)
+
+    # -- 全局总览（task5 P-10）------------------------------------------- #
+    def set_global(self, payload: GlobalTrafficStatusPayload) -> None:
+        with self._overview_lock:
+            self.latest_global = payload
+
+    def set_sv_meta(self, meta: dict) -> None:
+        with self._overview_lock:
+            self.sv_meta = dict(meta)
+            self.sv_meta_ts = self.now()
+
+    def overview(self) -> dict:
+        """系统级共识（路口数/车辆/等待/均速）+ SV 仿真元信息（算法/步数/运行）合并。"""
+        with self._overview_lock:
+            g = self.latest_global
+            meta = dict(self.sv_meta)
+            meta_ts = self.sv_meta_ts
+        total_steps = _meta_int(meta.get("total_steps"))
+        sim_step = _meta_int(meta.get("sim_step"))
+        if total_steps is not None and sim_step is not None:
+            sim_step = min(sim_step, total_steps)
+        meta_fresh = False
+        if meta_ts is not None:
+            meta_fresh = (self.now() - meta_ts).total_seconds() <= HEARTBEAT_ONLINE_TTL_SEC
+        return {
+            "junction_count": g.junction_count if g else 0,
+            "total_vehicles": g.total_vehicles if g else 0,
+            "total_halting": g.total_halting if g else 0,
+            "mean_speed_kmh": round(g.mean_speed_kmh, 1) if g else 0.0,
+            "algorithm": meta.get("algorithm"),
+            "sim_step": sim_step,
+            "total_steps": total_steps,
+            "running": bool(meta.get("running", False)) and meta_fresh,
+        }
 
     # -- 命令发布 --------------------------------------------------------- #
     def publish_command(self, env: Envelope, *, timeout: float = 5.0) -> str:

@@ -108,6 +108,85 @@ def test_command_requires_target_and_expires():
     assert c.partition_key(cmd) == "traffic-gateway-001"
 
 
+def test_signal_phase_control_roundtrip():
+    """task5：控制层相位注入往返 + 按 intersection_id 分区（与状态层对偶）。"""
+    payload = c.SignalPhasePayload(
+        intersection_id="1", phase_index=2, based_on_sim_step=120, based_on_sim_time=120.0
+    )
+    env = c.signal_phase_envelope(
+        agent_id="traffic-exec-sv-j1", payload=payload, event_ts="2026-06-29T08:00:00.000Z"
+    )
+    back = c.Envelope.model_validate_json(json.dumps(env.to_wire()))
+    got = c.parse_payload(back)
+    assert isinstance(got, c.SignalPhasePayload)
+    assert got.phase_index == 2 and got.based_on_sim_step == 120
+    assert back.event_type == c.EventType.CONTROL_TRAFFIC_PHASE
+    assert c.partition_key(env) == "1"
+    assert c.TrafficTopics.CONTROL_PHASE == "anp.traffic.control.phase.v1"
+    assert c.TrafficTopics.CONTROL_PHASE in c.ALL_TRAFFIC_TOPICS
+
+
+def test_signal_phase_rejects_negative_index():
+    with pytest.raises(ValidationError):
+        c.SignalPhasePayload(intersection_id="1", phase_index=-1, based_on_sim_step=0)
+
+
+def test_signal_phase_event_ts_carried():
+    """世界时钟 v1：相位携带 based_on_event_ts（挂钟过期判据）往返不丢。"""
+    payload = c.SignalPhasePayload(
+        intersection_id="1", phase_index=0, based_on_sim_step=10,
+        based_on_event_ts="2026-06-29T08:00:00.000Z",
+    )
+    env = c.signal_phase_envelope(agent_id="traffic-exec-sv-j1", payload=payload)
+    back = c.parse_payload(c.Envelope.model_validate_json(json.dumps(env.to_wire())))
+    assert isinstance(back, c.SignalPhasePayload)
+    assert back.based_on_event_ts == "2026-06-29T08:00:00.000Z"
+
+
+def test_world_clock_freshness():
+    """世界时钟 v1：统一挂钟新鲜度工具 age_seconds / is_fresh。"""
+    from datetime import timedelta
+
+    now = c.now_utc()
+    fresh_ts = c.iso_utc(now - timedelta(seconds=3))
+    stale_ts = c.iso_utc(now - timedelta(seconds=30))
+    assert abs(c.age_seconds(fresh_ts, now=now) - 3.0) < 0.5
+    assert c.is_fresh(fresh_ts, max_age_sec=12.0, now=now) is True
+    assert c.is_fresh(stale_ts, max_age_sec=12.0, now=now) is False
+    assert c.is_fresh(None) is False              # 缺失保守判不新鲜
+    assert c.is_fresh("not-a-time") is False      # 非法串保守判不新鲜
+
+
+def test_observation_sim_clock_optional_and_carried():
+    """task5：ObservationPayload.sim_clock 可选（向后兼容）；带上后经 JSON 往返保真。"""
+    obs = c.ObservationPayload(
+        intersection_id="1",
+        approaches=[c.Approach(direction=c.Direction.NORTH, vehicle_count=3, halting_count=1, mean_speed_mps=5.0)],
+        sim_clock=c.SimClock(sim_time=42.0, sim_step=42),
+    )
+    env = c.observation_envelope(agent_id="traffic-perception-sv-j1", payload=obs)
+    back = c.parse_payload(c.Envelope.model_validate_json(json.dumps(env.to_wire())))
+    assert back.sim_clock is not None and back.sim_clock.sim_step == 42
+    # 不带 sim_clock 仍合法（旧感知体无此字段）
+    assert c.ObservationPayload(intersection_id="1", approaches=obs.approaches).sim_clock is None
+
+
+def test_global_status_roundtrip():
+    """task5 P-10：全局总览往返 + heartbeat.metadata 承载 SV 元信息（向后兼容）。"""
+    g = c.GlobalTrafficStatusPayload(
+        junction_count=71, total_vehicles=222, total_halting=214, mean_speed_kmh=2.4,
+        sim_clock=c.SimClock(sim_time=3501.0, sim_step=3501),
+    )
+    env = c.global_status_envelope(agent_id="traffic-model-passthrough", payload=g)
+    back = c.parse_payload(c.Envelope.model_validate_json(json.dumps(env.to_wire())))
+    assert isinstance(back, c.GlobalTrafficStatusPayload)
+    assert back.total_vehicles == 222 and back.junction_count == 71
+    assert env.event_type == c.EventType.STATUS_TRAFFIC_GLOBAL
+    assert c.TrafficTopics.STATUS_GLOBAL == "anp.traffic.status.global.v1"
+    assert c.AgentHeartbeatPayload(status="online").metadata == {}
+    assert c.AgentHeartbeatPayload(status="online", metadata={"algorithm": "maxpressure"}).metadata["algorithm"] == "maxpressure"
+
+
 def test_extra_fields_forbidden():
     with pytest.raises(ValidationError):
         c.ObservationPayload.model_validate(
@@ -132,6 +211,8 @@ def test_confidence_bounds():
         ("observation.schema.json", c.ObservationPayload),
         ("video_text.schema.json", c.VideoTextEventPayload),
         ("status.intersection.schema.json", c.IntersectionStatusPayload),
+        ("status.global.schema.json", c.GlobalTrafficStatusPayload),
+        ("control.phase.schema.json", c.SignalPhasePayload),
         ("command.schema.json", c.CommandPayload),
         ("ack.schema.json", c.AckPayload),
         ("agent.lifecycle.schema.json", c.AgentLifecyclePayload),

@@ -188,6 +188,27 @@ def create_app(state: GatewayState | None = None) -> FastAPI:
             return denied
         return JSONResponse(content=mapping.build_world(state))
 
+    # -- 读：overview（交通域全局总览：系统级共识 + SV 仿真元信息，task5 P-10）-- #
+    @app.get(API_PREFIX + "/overview")
+    def get_overview(request: Request) -> JSONResponse:
+        denied = require_read(request)
+        if denied:
+            return denied
+        return JSONResponse(content={"ok": True, **state.overview()})
+
+    # -- 读：intersection/{id}（单路口 World Status，前端侧栏详情，task5 P-10）-- #
+    @app.get(API_PREFIX + "/intersection/{intersection_id}")
+    def get_intersection(request: Request, intersection_id: str) -> JSONResponse:
+        denied = require_read(request)
+        if denied:
+            return denied
+        st = state.status_store.all().get(intersection_id)
+        if st is None:
+            return JSONResponse(
+                content={"ok": False, "error": {"code": "not_found", "message": f"路口 {intersection_id} 暂无 World Status"}}
+            )
+        return JSONResponse(content={"ok": True, "intersection": st.model_dump(mode="json")})
+
     # -- 读：sv-network（真实 SV 路网几何，前端画真图）-------------------- #
     # 务实例外：网关唯一一处直连外部源 HTTP（SV /api/network），只读几何、不入 Kafka 黑板；
     # SV 原生结构的解析在 adapter（build_road_geometry），网关只搬运。同步 def → 线程池跑阻塞 IO。

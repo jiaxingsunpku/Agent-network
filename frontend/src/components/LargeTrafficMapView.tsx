@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Focus, Map as MapIcon, Minus, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronUp, Focus, Map as MapIcon, Minus, Plus, Search } from "lucide-react";
 import { AgentNode, NetworkSnapshot, WorldModelRuntime } from "../types";
 import {
+  fetchOverview,
   fetchSvMaps,
   fetchSvNetwork,
   sendAgentNetworkCommand,
   SvMapEntry,
   SvNetworkGeometry,
+  TrafficOverview,
   WorldAgent
 } from "../api/agentNetworkClient";
 
@@ -121,6 +123,8 @@ interface Props {
   selectedAgentId?: string | null;
   /** model 视图：只高亮这些成员 agent，其余 agent 标记淡化。null/缺省=世界总览(全部正常)。 */
   focusAgentIds?: string[] | null;
+  /** 是否显示交通域推理总览卡；世界总览不展示，具体 model 视图保留。 */
+  showOverviewPanel?: boolean;
 }
 
 const MAP_URL = "/large-traffic-map.json";
@@ -196,7 +200,7 @@ function distanceToSegment(px: number, py: number, ax: number, ay: number, bx: n
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSvNetworkChange, worldAgents, agentMode, onAgentSelect, selectedAgentId, focusAgentIds }: Props) {
+export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSvNetworkChange, worldAgents, agentMode, onAgentSelect, selectedAgentId, focusAgentIds, showOverviewPanel = true }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const camera = useRef<CameraState>({ x: 0, y: 0, scale: 0.08 });
   const drag = useRef({ active: false, lastX: 0, lastY: 0, moved: false });
@@ -208,10 +212,12 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
   const [error, setError] = useState("");
   const [pulseFrame, setPulseFrame] = useState(0);
   // 切图（set_signal_map）：可用地图列表、当前选择、下发状态/反馈。
+  const [overview, setOverview] = useState<TrafficOverview | null>(null);
   const [maps, setMaps] = useState<SvMapEntry[]>([]);
   const [selectedMap, setSelectedMap] = useState("");
   const [switching, setSwitching] = useState(false);
   const [mapNotice, setMapNotice] = useState("");
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
 
   // 能接收 set_signal_map 的 SV 执行体（snapshot registry）；缺失则切图不可用。
   const mapExec = useMemo(
@@ -234,6 +240,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
 
     for (const agent of worldAgents ?? []) {
       if (agent.agentType === "model") continue;
+      if (agent.status !== "online") continue; // task5：只把在线 agent 上图（滤掉残留/离线的 per-junction agent）
       const keys = new Set<string>();
       for (const ch of [...(agent.produces ?? []), ...(agent.consumes ?? [])]) {
         for (const k of ch.keys) keys.add(k);
@@ -405,6 +412,22 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
     return () => window.clearInterval(id);
   }, []);
 
+  // task5 P-10：全局总览卡（网关 /overview：系统级聚合共识 + SV 仿真元信息）
+  useEffect(() => {
+    if (!showOverviewPanel) {
+      setOverview(null);
+      return undefined;
+    }
+    let alive = true;
+    const load = async () => {
+      const o = await fetchOverview();
+      if (alive) setOverview(o);
+    };
+    load();
+    const id = window.setInterval(load, 1500);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [showOverviewPanel]);
+
   const mapY = useCallback((rawY: number) => {
     if (!data) return rawY;
     return data.bounds.maxY - rawY + data.bounds.minY;
@@ -574,29 +597,39 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         const ags = agentsByJunction.get(inter.id)!;
         const focusSet = focusAgentIds ? new Set(focusAgentIds) : null;
         const visibleAgents = focusSet ? ags.filter((agent) => focusSet.has(agent.id)) : ags;
-        const displayAgent = visibleAgents[0] ?? ags[0];
+        const drawAgents = visibleAgents.length ? visibleAgents : ags;
         const agentSelected = !!selectedAgentId && ags.some((agent) => agent.id === selectedAgentId);
         const inFocus = !focusSet || visibleAgents.length > 0;
-        const markerColor = displayAgent ? agentMarkerColor(displayAgent) : AGENT_RING;
+        const n = drawAgents.length;
         ctx.globalAlpha = inFocus ? 1 : 0.18;
-        ctx.strokeStyle = agentSelected ? "#2563eb" : markerColor;
-        ctx.lineWidth = agentSelected ? 3.2 : 2.4;
+        // 路口共享环（有 agent 标记）
+        ctx.strokeStyle = agentSelected ? "#2563eb" : "#9aa7b8";
+        ctx.lineWidth = agentSelected ? 3.2 : 2.0;
         ctx.beginPath();
         ctx.arc(p.x, p.y, radius + 6, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = markerColor;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2);
-        ctx.fill();
-        if (displayAgent && inFocus && agentMode) {
-          const text = agentMarkerLabel(displayAgent);
-          ctx.font = "700 11px Inter, Microsoft YaHei, sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillStyle = "#172033";
-          ctx.strokeStyle = "rgba(255,255,255,.94)";
-          ctx.lineWidth = 4;
-          ctx.strokeText(text, p.x, p.y + radius + 18);
-          ctx.fillText(text, p.x, p.y + radius + 18);
+        // 同一路口的多个 agent（感知/执行）各画一个小圆点，微小错开避免重叠
+        drawAgents.forEach((agent, i) => {
+          const ang = n > 1 ? (i * 2 * Math.PI) / n - Math.PI / 2 : 0;
+          const rr = n > 1 ? 10 : 0;
+          ctx.fillStyle = agentMarkerColor(agent);
+          ctx.beginPath();
+          ctx.arc(p.x + rr * Math.cos(ang), p.y + rr * Math.sin(ang), 3.0, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        // 标签：每个 agent 一行（各自颜色），纵向错开避免叠字
+        if (inFocus && agentMode) {
+          drawAgents.forEach((agent, i) => {
+            const text = agentMarkerLabel(agent);
+            ctx.font = "700 11px Inter, Microsoft YaHei, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillStyle = agentMarkerColor(agent);
+            ctx.strokeStyle = "rgba(255,255,255,.94)";
+            ctx.lineWidth = 4;
+            const ly = p.y + radius + 18 + i * 13;
+            ctx.strokeText(text, p.x, ly);
+            ctx.fillText(text, p.x, ly);
+          });
         }
         ctx.globalAlpha = 1;
       }
@@ -644,7 +677,7 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
     const scale = camera.current.scale;
     for (const inter of data.intersections) {
       const distance = Math.hypot(world.x - inter.x, world.y - inter.y);
-      const radius = Math.max(9 / scale, 16);
+      const radius = Math.max(14 / scale, 18);
       if (distance <= radius) return { kind: "intersection", id: inter.id, label: inter.label, x, y, data: inter };
     }
     if (scale > 0.055) {
@@ -698,7 +731,20 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         if (agentMode) {
           if (hit?.kind === "intersection") {
             const ags = agentsByJunction.get(hit.id) ?? [];
-            const preferred = ags.find((agent) => agent.commandTypes.length > 0) ?? ags[0] ?? null;
+            // 按点击位置选最近的 agent 小圆点（错开后感知/执行可分别点中）
+            let preferred = ags[0] ?? null;
+            if (ags.length > 1) {
+              const c = worldToScreen(hit.data.x, hit.data.y);
+              const n = ags.length;
+              let best = Infinity;
+              ags.forEach((agent, i) => {
+                const ang = (i * 2 * Math.PI) / n - Math.PI / 2;
+                const ax = c.x + 10 * Math.cos(ang);
+                const ay = c.y + 10 * Math.sin(ang);
+                const d = (ax - p.x) ** 2 + (ay - p.y) ** 2;
+                if (d < best) { best = d; preferred = agent; }
+              });
+            }
             onAgentSelect?.(preferred);
           } else {
             onAgentSelect?.(null);
@@ -763,6 +809,45 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
         <button onClick={() => zoom(0.82)} title="缩小"><Minus size={18} /></button>
         <button onClick={resetView} title="回中"><Focus size={18} /></button>
       </div>
+
+      {showOverviewPanel && overview && (
+        <div className={`large-map-overview${overviewCollapsed ? " collapsed" : ""}`} aria-label="多智能体信号灯控制推理">
+          <button
+            type="button"
+            className="lmo-toggle"
+            onClick={() => setOverviewCollapsed((value) => !value)}
+            title={overviewCollapsed ? "展开总览" : "收起总览"}
+          >
+            {overviewCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+          </button>
+          <div className="lmo-head">
+            <span className="lmo-sub">MULTI-AGENT SIGNAL CONTROL</span>
+            {overview.algorithm && <span className="lmo-algo">{overview.algorithm}</span>}
+          </div>
+          <div className="lmo-title">多智能体信号灯控制推理</div>
+          {!overviewCollapsed && (
+            <>
+              <div className="lmo-metrics">
+                <div className="lmo-cell"><label>智能体</label><b>{overview.junction_count}</b></div>
+                <div className="lmo-cell"><label>车辆</label><b>{overview.total_vehicles}</b></div>
+                <div className="lmo-cell"><label>等待</label><b>{overview.total_halting}</b></div>
+                <div className="lmo-cell"><label>均速</label><b>{overview.mean_speed_kmh} km/h</b></div>
+                <div className="lmo-cell"><label>时间步</label><b>{overview.sim_step ?? "-"}/{overview.total_steps ?? "-"}</b></div>
+              </div>
+              <div className="lmo-foot">
+                <span className={overview.running ? "lmo-dot on" : "lmo-dot"} />
+                {overview.running ? "推理运行中" : "已停止"}
+              </div>
+            </>
+          )}
+          {overviewCollapsed && (
+            <div className="lmo-foot compact">
+              <span className={overview.running ? "lmo-dot on" : "lmo-dot"} />
+              {overview.running ? "运行中" : "已停止"} · {overview.sim_step ?? "-"}/{overview.total_steps ?? "-"}
+            </div>
+          )}
+        </div>
+      )}
 
       {data?.source === "signalvision" && maps.length > 0 && (
         <div className="large-map-mapswitch" aria-label="切换路网">

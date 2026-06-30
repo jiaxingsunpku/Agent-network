@@ -5,6 +5,8 @@
       "enum": [
         "observation.traffic.intersection",
         "status.traffic.intersection",
+        "control.traffic.phase",
+        "status.traffic.global",
         "observation.video.text",
         "command",
         "command.ack",

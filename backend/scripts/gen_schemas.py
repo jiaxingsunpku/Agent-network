@@ -20,8 +20,10 @@ from anp.contracts import (
     AgentLifecyclePayload,
     CommandPayload,
     Envelope,
+    GlobalTrafficStatusPayload,
     IntersectionStatusPayload,
     ObservationPayload,
+    SignalPhasePayload,
     VideoTextEventPayload,
 )
 
@@ -36,6 +38,14 @@ TARGETS = {
     "status.intersection.schema.json": (
         IntersectionStatusPayload,
         "路口 World Status payload（docs/world-status.md §3）",
+    ),
+    "status.global.schema.json": (
+        GlobalTrafficStatusPayload,
+        "交通域全局总览 payload（task5 P-10）",
+    ),
+    "control.phase.schema.json": (
+        SignalPhasePayload,
+        "控制层相位注入 payload（task5，docs/protocol.md §5）",
     ),
     "command.schema.json": (CommandPayload, "命令 payload（docs/protocol.md §5）"),
     "ack.schema.json": (AckPayload, "命令回执 payload（docs/protocol.md §5）"),

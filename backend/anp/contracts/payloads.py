@@ -35,10 +35,21 @@ class Approach(_Strict):
     mean_delay_sec: float | None = Field(default=None, ge=0)
 
 
+class SimClock(_Strict):
+    """仿真时钟（task5 双时间戳地基）：边缘仿真器(SUMO)的自有时钟，与 envelope.time.event_ts
+    (挂钟)并存，作为异步控制回路的对齐/过期判据。完整的世界-边缘时钟同步留作未来一等公民问题。
+    """
+
+    sim_time: float = Field(ge=0)  # 仿真时间（秒）
+    sim_step: int = Field(ge=0)    # 仿真步序（整数步）
+
+
 class ObservationPayload(_Strict):
     observation_type: Literal["traffic.intersection"] = "traffic.intersection"
     intersection_id: str = Field(min_length=1)
     approaches: list[Approach] = Field(min_length=1)
+    #: task5：仿真时钟（可选；边缘为 SUMO 时带上，供执行体判断状态新鲜度、相位过期）。
+    sim_clock: SimClock | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -107,6 +118,23 @@ class IntersectionStatusPayload(_Strict):
     congestion_level: CongestionLevel
     congestion_index: float = Field(ge=0, le=1)
     approaches: list[ApproachStatus] = Field(default_factory=list)
+    #: task5：透传感知的仿真时钟（执行体据此得 based_on_sim_step；可选，向后兼容）。
+    sim_clock: SimClock | None = None
+
+
+class GlobalTrafficStatusPayload(_Strict):
+    """交通域全局总览（task5 P-10，topic anp.traffic.status.global.v1）。
+
+    系统级 model 聚合所有路口观测产出的**共识指标**（路口数/车辆/等待/均速）；SV 仿真元信息
+    （算法/步数/运行状态）不在此，由 SV host 经心跳 ``metadata`` 带、网关合并（保持「共识由系统级算」）。
+    """
+
+    status_type: Literal["traffic.global"] = "traffic.global"
+    junction_count: int = Field(ge=0)          # 收到观测的路口数
+    total_vehicles: int = Field(ge=0)          # 全域瞬时车辆总数
+    total_halting: int = Field(ge=0)           # 全域等待（滞留）车辆总数
+    mean_speed_kmh: float = Field(ge=0)        # 全域车辆均速
+    sim_clock: SimClock | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +144,27 @@ class CommandPayload(_Strict):
     command_id: str = Field(min_length=1)
     command_type: CommandType
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class SignalPhasePayload(_Strict):
+    """控制层相位注入（task5，topic anp.traffic.control.phase.v1）。
+
+    执行体（决策外置）算出某路口的目标相位 index，下发给 SV 写灯口注入运行中 SUMO。
+    异步语义：写灯口用最近一条未过期相位覆盖内置算法，过期（``based_on_sim_step`` 落后过多）
+    回落内置算法。phase_index 合法性（``∈[0, 路口相位数-1]``）由 SV 写灯口本地 Safety Guard 校验。
+    """
+
+    control_type: Literal["signal.phase"] = "signal.phase"
+    intersection_id: str = Field(min_length=1)
+    #: 目标相位 index（SV 原生 phase index，0-based）。
+    phase_index: int = Field(ge=0)
+    #: 该决策所基于状态的仿真步（过期判据：写灯口比对当前 sim_step 的落后量）。
+    based_on_sim_step: int = Field(ge=0)
+    #: 对应的仿真时间（秒，可选，辅助溯源/对齐）。
+    based_on_sim_time: float | None = Field(default=None, ge=0)
+    #: 决策所基于观测的**事件挂钟**（ISO8601 UTC，世界时钟 v1）。写灯口据此算挂钟 age 判过期，
+    #: 统一 SUMO/视频等多源（取代只对 SUMO 有意义的 sim_step）；可选、向后兼容。
+    based_on_event_ts: str | None = None
 
 
 class SafetyDecision(_Strict):
@@ -171,3 +220,6 @@ class AgentHeartbeatPayload(_Strict):
 
     status: str = Field(min_length=1)  # online | degraded | offline ...
     last_error: str | None = None
+    #: task5 P-10：agent 自报的轻量运行元信息（如 SV host 带 algorithm/sim_step/total_steps/running）。
+    #: 加法、向后兼容：旧消息无此字段按默认空 dict validate。
+    metadata: dict[str, Any] = Field(default_factory=dict)

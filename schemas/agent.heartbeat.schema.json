@@ -18,6 +18,11 @@
       ],
       "default": null,
       "title": "Last Error"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
     }
   },
   "required": [

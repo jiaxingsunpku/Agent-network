@@ -6,6 +6,10 @@
 # topic                                    partitions  rf
 anp.traffic.perception.observation.v1      6           1
 anp.traffic.status.intersection.v1         6           1
+# 全局总览（task5 P-10：系统级聚合，全域单条）
+anp.traffic.status.global.v1               1           1
+# 控制层相位注入（task5：执行体→SV 写灯口，per-junction phase_index，按 intersection_id 分区）
+anp.traffic.control.phase.v1               6           1
 anp.traffic.command.v1                     3           1
 anp.traffic.ack.v1                         3           1
 anp.traffic.agent.lifecycle.v1             1           1

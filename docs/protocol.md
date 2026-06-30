@@ -44,6 +44,8 @@
 - 系统级智能体的滚动窗口**按 `event_ts` 切桶**，不按 ingest 时间，以此对齐网络延迟与乱序。
 - 迟到消息：若 `event_ts` 早于当前已关闭窗口的水位线，直接丢弃（见 world-status.md 的 grace 规则）。
 - 时间一律 UTC、ISO8601、带 `Z`。
+- **世界时钟 v1（多源统一时基，详见 [world-clock.md](world-clock.md)）**：统一世界时基 = UTC 挂钟。`event_ts` 经各层**透传贯穿全链**（status 透传观测的 event_ts；控制层相位带 `payload.based_on_event_ts`），执行端按**挂钟新鲜度**判过期（`age = now − based_on_event_ts > max_age(默认 12s)` → 回落内置），统一 SUMO/视频等多源——这是视频组等真实感知源接入的前置。
+- **仿真时钟（SUMO 源辅助）**：边缘为仿真器（SUMO）时，观测/控制 payload 另带 `sim_clock{sim_time, sim_step}`，作 SUMO 源的辅助元数据 + **过期旁路**（`sim_step` 落后判据，防仿真加速下注入仿真上已过时的相位）；真实源不带 `sim_clock`、只走挂钟。轻版 v1 不做应用层跨机时钟校正（靠各机 NTP），完整时钟同步留未来。
 
 ## 3. event_type 与 payload 对应
 
@@ -51,6 +53,7 @@
 |---|---|---|
 | `anp.traffic.perception.observation.v1` | `observation.traffic.intersection` | `intersection_id`、`approaches[]`（见 world-status.md §2） |
 | `anp.traffic.status.intersection.v1` | `status.traffic.intersection` | 路口 World Status（见 world-status.md §3） |
+| `anp.traffic.control.phase.v1` | `control.traffic.phase` | `intersection_id`、`phase_index`、`based_on_sim_step`（task5：执行体→SV 写灯口相位注入；异步、最近覆盖、过期回落内置） |
 | `anp.traffic.command.v1` | `command` | `command_id`、`command_type`、`params{}` |
 | `anp.traffic.ack.v1` | `command.ack` | `command_id`、`command_type`、`status`、`safety{}` |
 | `anp.traffic.agent.lifecycle.v1` | `agent.registered` / `agent.deregistered` | `agent_id`、`agent_type`、`capabilities[]`、`command_types[]` |

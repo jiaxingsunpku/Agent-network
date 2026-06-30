@@ -304,6 +304,63 @@ export interface SvNetworkGeometry {
 }
 
 /** 真实 SV 路网几何（网关 /sv-network relay SV /api/network）。不可达/未启用时返回 null（前端回落静态图）。 */
+export interface TrafficOverview {
+  junction_count: number;
+  total_vehicles: number;
+  total_halting: number;
+  mean_speed_kmh: number;
+  algorithm: string | null;
+  sim_step: number | null;
+  total_steps: number | null;
+  running: boolean;
+}
+
+/** 交通域全局总览（网关 /overview：系统级聚合共识 + SV 仿真元信息，task5 P-10）。不可达返回 null。 */
+export async function fetchOverview(): Promise<TrafficOverview | null> {
+  try {
+    const response = await fetchAgentNetwork("/overview", { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    if (!response.headers.get("content-type")?.includes("application/json")) return null;
+    const data = await response.json();
+    if (!data?.ok) return null;
+    return data as TrafficOverview;
+  } catch {
+    return null;
+  }
+}
+
+export interface IntersectionApproach {
+  direction: string;
+  queue_length_m: number;
+  flow_veh_h: number;
+  mean_speed_kmh: number;
+}
+export interface IntersectionDetail {
+  intersection_id: string;
+  queue_length_m: number;
+  flow_veh_h: number;
+  mean_speed_kmh: number;
+  mean_delay_sec: number;
+  congestion_level: string;
+  congestion_index: number;
+  approaches: IntersectionApproach[];
+  sim_clock?: { sim_time: number; sim_step: number } | null;
+}
+
+/** 单路口 World Status（网关 /intersection/{id}，task5 P-10 侧栏详情）。无状态/不可达返回 null。 */
+export async function fetchIntersection(id: string): Promise<IntersectionDetail | null> {
+  try {
+    const response = await fetchAgentNetwork(`/intersection/${encodeURIComponent(id)}`, { cache: "no-store", headers: { Accept: "application/json" } });
+    if (!response.ok) return null;
+    if (!response.headers.get("content-type")?.includes("application/json")) return null;
+    const data = await response.json();
+    if (!data?.ok) return null;
+    return data.intersection as IntersectionDetail;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSvNetwork(): Promise<SvNetworkGeometry | null> {
   try {
     const response = await fetchAgentNetwork("/sv-network", { cache: "no-store", headers: { Accept: "application/json" } });

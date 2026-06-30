@@ -25,6 +25,14 @@ topic/agent id 见 [naming.md](naming.md)。
 > 适配器的「方向」不止感知/执行：`visionhub/` 是**域级双向桥**——既把 ANP 下行命令译给外部源，
 > 又把外部源的文本结果译回 ANP 感知层。本质仍是「只在 adapter 内懂外部原生结构」这一原则。
 
+> **task5（SV 控制回路改道经 Kafka，2026-06-30）补充**：除下述 HTTP 旁路 adapter 外，第一步把
+> SignalVision **改造成原生 Kafka 边缘节点**——SV 进程内直接发 per-junction 观测、订阅 control 层
+> 相位注入、自注册+心跳（代码在 SV 仓库 `dashboard/integration/anp_{kafka,sensing,exec_agent}.py`，
+> **不在本子包**）。决策外置为 SV 仓库内独立执行体（订阅状态层 → 方向级 max-pressure →
+> `anp.traffic.control.phase.v1` → 写灯口 `pseudo_step` 注入运行中 SUMO；异步最近覆盖 + 过期回落内置）。
+> 这是与本子包旧 HTTP 旁路 adapter 的**根本区别**（旧 adapter 不驱动 SUMO、只读旁路；新链路真控）。
+> 旧 adapter 暂留作旁路备选。详见 `tasks/task5/`。
+
 ## 2. SignalVision 感知适配器
 
 ### 2.1 数据源

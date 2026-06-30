@@ -30,6 +30,8 @@ class Layer(str, Enum):
 
     PERCEPTION = "perception"
     STATUS = "status"
+    #: task5：控制层（执行体→执行端的相位注入等下行控制流，区别于人/网关的 command 层）。
+    CONTROL = "control"
     COMMAND = "command"
     ACK = "ack"
     AGENT_LIFECYCLE = "agent.lifecycle"
@@ -57,6 +59,10 @@ class TrafficTopics:
 
     OBSERVATION = build_topic(Domain.TRAFFIC, Layer.PERCEPTION, "observation")
     STATUS_INTERSECTION = build_topic(Domain.TRAFFIC, Layer.STATUS, "intersection")
+    #: task5 P-10：全局总览（系统级 model 聚合所有路口共识指标）。
+    STATUS_GLOBAL = build_topic(Domain.TRAFFIC, Layer.STATUS, "global")
+    #: task5：控制层相位注入（执行体 → SV 写灯口，per-junction phase_index，按 intersection_id 分区）。
+    CONTROL_PHASE = build_topic(Domain.TRAFFIC, Layer.CONTROL, "phase")
     COMMAND = build_topic(Domain.TRAFFIC, Layer.COMMAND)
     ACK = build_topic(Domain.TRAFFIC, Layer.ACK)
     AGENT_LIFECYCLE = build_topic(Domain.TRAFFIC, Layer.AGENT_LIFECYCLE)
@@ -68,6 +74,8 @@ class TrafficTopics:
 ALL_TRAFFIC_TOPICS: tuple[str, ...] = (
     TrafficTopics.OBSERVATION,
     TrafficTopics.STATUS_INTERSECTION,
+    TrafficTopics.STATUS_GLOBAL,
+    TrafficTopics.CONTROL_PHASE,
     TrafficTopics.COMMAND,
     TrafficTopics.ACK,
     TrafficTopics.AGENT_LIFECYCLE,

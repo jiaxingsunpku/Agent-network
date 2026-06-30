@@ -104,6 +104,7 @@ GET  /api/agent-network/timeseries/*      # 冷路径，本期返回「未启用
 - **P4** 迁移前端，指向新网关，端到端跑通（非 mock）。
 - **P5** 真实 SignalVision adapter：**感知接入已落地**（`adapters/signalvision/`，见 [adapters.md](adapters.md)）；命令控制闭环（信号控制）已在 P6 落地。
 - **P7** 视频文本事件问答（`video` 域，原生迁入视频组「事件文本问答」能力）：视频感知体发文本事件 → 集中文本库 → 检索 → LLM(GLM) 问答 + 前端面板，见 [video.md](video.md)。原始视频不进 Kafka；视频流播放 / 路口预测仍属后续。
+- **task5（SV 控制回路改道经 Kafka，第一步纯 SUMO 闭环）**：把 SignalVision 进程内自洽的信号控制闭环（读 SUMO → 内置算法 → 写 SUMO）改道经 ANP 三层——SV 原生接 Kafka，per-junction 感知发到感知层、交通 model 透传到状态层、**决策外置的执行体（SV 仓库内独立进程）订阅状态跑方向级 max-pressure → 经新增 control 层 `anp.traffic.control.phase.v1` 把相位注入回运行中 SUMO**（异步：最近相位覆盖内置算法、过期回落）。实测真执行体相位被 SV 全量注入、零过期、SUMO 跟随；Kafka 挂了 SV 仍自闭环。详见 `tasks/task5/`。第二步（摄像头替换 SUMO 感知）属后续。
 
 ## 8. 从老仓库借鉴 vs 丢弃
 
