@@ -240,7 +240,8 @@ def test_inference_start_completed_calls_sv_start():
 
 
 def test_signalvision_client_start_requests_integration_mode():
-    # task5：start_simulation 用集成模式（DashboardController）+ step_delay，才接 ANP 感知/注入链路。
+    # ANP 启动推理走 integration（真驱动 DashboardController = task5 感知/注入链路）+ demand=fixed
+    # （默认 onfly 对 ezhou 零车流）。8080 server 须带 SUMO_HOME，否则集成模式初始化会秒退。
     class CapturingClient(SignalVisionClient):
         def __init__(self):
             super().__init__("http://sv.test")
@@ -255,7 +256,7 @@ def test_signalvision_client_start_requests_integration_mode():
     assert resp.ok
     assert client.last_post == (
         "/api/simulation/start",
-        {"config": "maxpressure", "execution_mode": "integration", "step_delay": 0.05},
+        {"config": "maxpressure", "execution_mode": "integration", "step_delay": 0.05, "demand": "fixed"},
     )
 
 

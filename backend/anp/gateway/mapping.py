@@ -792,6 +792,12 @@ def build_world(state, now: datetime | None = None) -> dict:
     topology: Topology = state.topology
     records = registry.all()
     model_members = _derive_model_members(records)
+    # 已下线的 model 不该再出现在 agent 的「被 model 使用」里（与下面 models 列表过滤一致，
+    # 避免注销后的残留 model 仍挂在成员 agent 的 governed_by 上）。
+    offline_model_ids = {
+        rec.agent_id for rec in records
+        if rec.agent_type == "model" and _AGENT_STATUS_MAP[rec.derived_status(now)] == "offline"
+    }
 
     agents = [
         {
@@ -804,22 +810,26 @@ def build_world(state, now: datetime | None = None) -> dict:
             "produces": _channel_dicts(rec.produces),
             "consumes": _channel_dicts(rec.consumes),
             "location": _agent_world_location(rec, topology),  # None = 非地理公民
-            "governed_by": [mid for mid, members in model_members.items() if rec.agent_id in members],
+            "governed_by": [mid for mid, members in model_members.items() if rec.agent_id in members and mid not in offline_model_ids],
         }
         for rec in records
     ]
 
-    models = [
-        {
+    # 过滤下线残留 model：deregister / 心跳过期后不再显示，避免旧 model（如已停的 spec）
+    # 残留在世界总览里造成「重复 model」的错觉。
+    models = []
+    for rec in registry.models():
+        status = _AGENT_STATUS_MAP[rec.derived_status(now)]
+        if status == "offline":
+            continue
+        models.append({
             "model_id": rec.agent_id,
-            "status": _AGENT_STATUS_MAP[rec.derived_status(now)],
+            "status": status,
             "members": list(model_members.get(rec.agent_id, rec.members)),
             "produce_topics": [ch.topic for ch in rec.produces],
             "subscribe_topics": [ch.topic for ch in rec.consumes],
             "weight": rec.weight,
-        }
-        for rec in registry.models()
-    ]
+        })
 
     return {
         "ok": True,

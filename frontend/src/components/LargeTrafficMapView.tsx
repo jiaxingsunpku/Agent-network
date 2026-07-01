@@ -22,6 +22,8 @@ const AGENT_MARKER_COLORS = {
 };
 
 function agentMarkerColor(agent: WorldAgent): string {
+  if (agent.status === "offline") return "#94a3b8";
+  if (agent.status === "syncing") return "#f59e0b";
   if (agent.agentType === "signalvision" && agent.capabilities.includes("exec")) return AGENT_MARKER_COLORS.signalvisionExec;
   if (agent.agentType === "signalvision") return AGENT_MARKER_COLORS.signalvisionPerception;
   if (agent.agentType === "virtual") return AGENT_MARKER_COLORS.virtual;
@@ -240,7 +242,6 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
 
     for (const agent of worldAgents ?? []) {
       if (agent.agentType === "model") continue;
-      if (agent.status !== "online") continue; // task5：只把在线 agent 上图（滤掉残留/离线的 per-junction agent）
       const keys = new Set<string>();
       for (const ch of [...(agent.produces ?? []), ...(agent.consumes ?? [])]) {
         for (const k of ch.keys) keys.add(k);
@@ -254,7 +255,9 @@ export function LargeTrafficMapView({ search, runtime, snapshot, svNetwork, onSv
           attached = true;
         }
       }
-      if (!attached) unmatched.push({ agent, entityKey: [...keys][0] ?? agent.id });
+      // 精确命中当前路网的 agent 即使 offline/syncing 也显示，避免感知体“消失”。
+      // 无法匹配当前路网且已离线的 agent 多为切图/重启残留，继续过滤。
+      if (!attached && agent.status !== "offline") unmatched.push({ agent, entityKey: [...keys][0] ?? agent.id });
     }
 
     const anchors = (data?.intersections ?? []).filter((inter) => inter.hasTrafficLight);

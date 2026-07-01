@@ -29,6 +29,7 @@ import argparse
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -91,27 +92,36 @@ def _executor_loop(
     producer = make_producer(bootstrap_servers=bootstrap)
     consumer = make_consumer(
         TrafficTopics.COMMAND,
-        group_id="anp-sv-exec",
+        group_id=f"anp-sv-exec-{uuid.uuid4().hex[:8]}",
         bootstrap_servers=bootstrap,
         auto_offset_reset="latest",
-        consumer_timeout_ms=1000,  # 周期返回以便检查 stop / duration
+        consumer_timeout_ms=float("inf"),
     )
     deadline = None if duration is None else time.monotonic() + duration
     print(f"[sv-exec] {executor.config.agent_id} 监听命令…（map={executor.config.junction_map}）")
     try:
         while not stop.is_set() and (deadline is None or time.monotonic() < deadline):
-            for record in consumer:
-                try:
-                    env = Envelope.model_validate(record.value)
-                except Exception:  # noqa: BLE001
-                    executor.dropped_invalid += 1
-                    continue
-                ack = executor.handle_command(env)
-                if ack is not None:
-                    executor.publish_ack(producer, ack, target_agent_id=env.source.agent_id)
-                    print(f"[sv-exec] cmd={ack.command_id[:8]} -> {ack.status.value}")
+            records = consumer.poll(timeout_ms=1000)
+            for batch in records.values():
+                for record in batch:
+                    try:
+                        env = Envelope.model_validate(record.value)
+                    except Exception:  # noqa: BLE001
+                        executor.dropped_invalid += 1
+                        continue
+                    ack = executor.handle_command(env)
+                    if ack is not None:
+                        executor.publish_ack(producer, ack, target_agent_id=env.source.agent_id)
+                        print(f"[sv-exec] cmd={ack.command_id[:8]} -> {ack.status.value}")
+                    if stop.is_set() or (deadline is not None and time.monotonic() >= deadline):
+                        break
                 if stop.is_set() or (deadline is not None and time.monotonic() >= deadline):
                     break
+            if stop.is_set() or (deadline is not None and time.monotonic() >= deadline):
+                break
+            # poll() keeps the consumer alive after idle periods; the old
+            # iterator+consumer_timeout_ms path stopped observing new commands
+            # after the first empty second.
     finally:
         consumer.close()
         producer.flush()

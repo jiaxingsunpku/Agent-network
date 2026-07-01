@@ -1,6 +1,6 @@
 {
-  "model_id": "traffic-passthrough",
-  "problem": "交通信号控制（task5 第一步：观测透传供执行体消费）",
+  "model_id": "智能交通信号管控",
+  "problem": "路口信号管控：观测透传供执行体消费（task5 第一步）",
   "member_agent_ids": [],
   "subscribe_topics": ["anp.traffic.perception.observation.v1"],
   "produce_topics": ["anp.traffic.status.intersection.v1"],

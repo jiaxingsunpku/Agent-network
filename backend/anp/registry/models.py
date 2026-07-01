@@ -57,6 +57,10 @@ class AgentRecord(BaseModel):
         """
 
         if self.last_heartbeat_ts is None:
+            # 已显式下线（deregister 设 reported=offline）即使从未心跳也算离线；
+            # 否则（刚注册等心跳）→ syncing。避免已注销的残留 model 一直卡在 syncing。
+            if (self.reported_status or "").lower() == DerivedStatus.OFFLINE.value:
+                return DerivedStatus.OFFLINE
             return DerivedStatus.SYNCING
         age = (now - self.last_heartbeat_ts).total_seconds()
         if age <= HEARTBEAT_ONLINE_TTL_SEC:

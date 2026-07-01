@@ -5,6 +5,7 @@ import { InspectorPanel } from "./components/InspectorPanel";
 import { getToolsForModel, ToolWorkspace } from "./components/ToolWorkspace";
 import { TopBar } from "./components/TopBar";
 import { WorldOverview } from "./components/WorldOverview";
+import { IntersectionDetailPanel } from "./components/IntersectionDetailPanel";
 import { worldModels } from "./data/worldModels";
 import { useSimulatedSnapshot } from "./hooks/useSimulatedSnapshot";
 import { useWorld } from "./hooks/useWorld";
@@ -87,6 +88,8 @@ export default function App() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => window.matchMedia("(max-width: 1180px)").matches);
 
   const inspectorOn = activeView === "model" && controlOpen;
+  // per-junction agent（traffic-*-sv-j<jid>）选中 → 显示该路口 World Status 详情（P-10 IntersectionDetailPanel）。
+  const junctionSelected = Boolean(selectedId && /-sv-j/i.test(selectedId));
 
   // 控制台打开但未选节点时，默认选第一个可下发命令的成员。
   useEffect(() => {
@@ -112,7 +115,7 @@ export default function App() {
 
   if (gatewayMode) {
     return (
-      <main className={`app-shell gateway-shell${inspectorOn ? "" : " no-inspector"}`}>
+      <main className={`app-shell gateway-shell${inspectorOn || junctionSelected ? "" : " no-inspector"}`}>
         <LeftToolbar
           items={gatewayItems}
           activeId={selectedModelId}
@@ -134,7 +137,7 @@ export default function App() {
             <span>{new Date(snapshot.generatedAt).toLocaleTimeString()}</span>
           </div>
           <div className="stage-wrap gateway-stage">
-            {activeView === "world" && <WorldOverview world={world} onSelectModel={selectDiscoveredModel} />}
+            {activeView === "world" && <WorldOverview world={world} onSelectModel={selectDiscoveredModel} onAgentSelect={(id) => setSelectedId(id)} />}
             {activeView === "model" && (
               <WorldOverview
                 world={world}
@@ -148,7 +151,9 @@ export default function App() {
             )}
           </div>
         </section>
-        {inspectorOn ? (
+        {junctionSelected ? (
+          <IntersectionDetailPanel agentId={selectedId!} onClose={() => setSelectedId(null)} />
+        ) : inspectorOn ? (
           <InspectorPanel
             snapshot={snapshot}
             selected={selected}

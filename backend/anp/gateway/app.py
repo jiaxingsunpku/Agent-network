@@ -81,6 +81,13 @@ def _dedupe(values: list[str]) -> list[str]:
     return out
 
 
+def _safe_int(value, fallback=None):
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _channels(channels: list[RegistrationChannelIn]) -> list[Channel]:
     return [Channel(topic=ch.topic.strip(), keys=_dedupe(ch.keys)) for ch in channels]
 
@@ -194,7 +201,22 @@ def create_app(state: GatewayState | None = None) -> FastAPI:
         denied = require_read(request)
         if denied:
             return denied
-        return JSONResponse(content={"ok": True, **state.overview()})
+        body = state.overview()
+        if cfg.with_consumers and cfg.sv_base_url:
+            from anp.adapters.signalvision import SignalVisionClient
+
+            status = SignalVisionClient(cfg.sv_base_url, timeout_sec=0.8).get_status()
+            if status.ok:
+                sv = status.body
+                running = bool(sv.get("running", False))
+                body["running"] = running
+                if sv.get("config"):
+                    body["algorithm"] = sv.get("config")
+                if sv.get("current_time") is not None:
+                    body["sim_step"] = _safe_int(sv.get("current_time"), body.get("sim_step"))
+                if sv.get("total_time") is not None:
+                    body["total_steps"] = _safe_int(sv.get("total_time"), body.get("total_steps"))
+        return JSONResponse(content={"ok": True, **body})
 
     # -- 读：intersection/{id}（单路口 World Status，前端侧栏详情，task5 P-10）-- #
     @app.get(API_PREFIX + "/intersection/{intersection_id}")

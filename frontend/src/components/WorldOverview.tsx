@@ -27,7 +27,7 @@ function channelText(chs: WorldChannel[]): string {
 function registrationTemplate(targetModelId: string): string {
   return JSON.stringify({
     source: "signalvision",
-    target_model_id: targetModelId || "traffic-control",
+    target_model_id: targetModelId || "智能交通信号管控",
     agents: [
       {
         agent_id: "traffic-perception-sv-001",
@@ -138,7 +138,7 @@ function RegistrationPanel({
             value={targetModelId}
             onChange={(event) => setTargetModelId(event.target.value)}
             list="world-registration-models"
-            placeholder="traffic-control"
+            placeholder="智能交通信号管控"
             style={{ height: 38, border: "1px solid rgba(100,116,139,0.28)", borderRadius: 8, padding: "0 10px", fontSize: 14, color: "inherit" }}
           />
           <datalist id="world-registration-models">
